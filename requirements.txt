@@ -1,11 +1,13 @@
-streamlit
-pandas
-numpy
-matplotlib
-geopandas
-rasterio
-pyproj
-scikit-learn
-pykrige
-requests
-beautifulsoup4
+# requirements.txt
+streamlit==1.35.0
+pandas==2.2.2
+geopandas==0.14.4
+requests==2.31.0
+numpy==1.26.4
+matplotlib==3.8.4
+pyproj==3.6.1
+pykrige==1.7.0
+scikit-learn==1.4.2
+rasterio==1.3.10
+beautifulsoup4==4.12.3
+urllib3<2.0 # Para evitar conflictos de versión con requests y botocore
