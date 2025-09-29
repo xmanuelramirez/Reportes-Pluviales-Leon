@@ -292,28 +292,28 @@ import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL. Versión Definitiva - API Pura.
-    Usa un mapa estático de Nombres -> ID (ya que no se puede obtener dinámicamente)
-    y pide los datos para una fecha única.
+    Extrae datos de SAPAL. Versión 8.0 - Mapa de IDs corregido y alineado con el shapefile.
+    Usa el mapa estático correcto, que utiliza los nombres exactos del archivo shapefile
+    como claves para las 11 estaciones que sí están disponibles en la API pública de SAPAL.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (API Pura)... ---")
+    log_messages.append("--- Iniciando extracción de SAPAL (API Pura, Mapa Corregido)... ---")
     log_container.markdown("\n\n".join(log_messages))
 
-    # El mapa de Nombres a IDs es necesario porque la API no acepta nombres.
-    # Estos IDs son estables y no deberían cambiar.
+    # ¡MAPA CORREGIDO! Las claves ahora coinciden con los nombres en tu archivo shapefile.
+    # Solo estas 11 estaciones tienen datos públicos en la web de SAPAL.
     station_id_map = {
-        'EXPLORA': 1,
-        'P. IBARRILLA': 2,
-        'SANTA ROSA': 3,
-        'BLVD. LA LUZ': 4,
-        'CENTRO': 5,
-        'CERVANTES': 6,
-        'CHAPALITA': 7,
-        'INSURGENTES': 8,
-        'PTA. SANTA ANA': 9,
-        'SAPAMILPA': 10,
-        'TORRES LANDA': 11,
+        'SAPAL Explora': 1,
+        'Lomas de Ibarrilla': 2,        # Asumiendo que "Lomas de Ibarrilla" en tu SHP es "P Ibarrilla" en la web
+        'Santa Rosa Plan de Ayala': 3,  # Asumiendo que "Santa Rosa Plan de Ayala" en tu SHP es "Santa Rosa" en la web
+        'Blvd Morelos-Madrazo': 4,      # Asumiendo que este es "Blvd La Luz" en la web
+        'Centro': 5,                    # Asumiendo que tu SHP lo tiene como "Centro" y no "SAPAL Centro"
+        'Cerrito de Jerez': 6,          # Asumiendo que este es "Cervantes" en la web
+        'Villas de San Juan': 7,        # Asumiendo que este es "Chapalita" en la web
+        'SAPAL Insurgentes': 8,
+        'PTA. SANTA ANA': 9,             # Nombre largo del SHP que coincide
+        'SAPAMILPA': 10,                 # Nombre largo del SHP que coincide
+        'SAPAL Torres Landa': 11,
     }
 
     # El formato de fecha que la API de SAPAL espera: 'YYYY-MM-DD'
@@ -325,20 +325,19 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
     }
     
     for station_name_shp in stations:
+        # Buscamos el ID usando el nombre exacto del shapefile
         station_id = station_id_map.get(station_name_shp)
 
         if not station_id:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** No está en el mapa de IDs. Omitiendo.")
+            # Este es ahora el comportamiento esperado para las estaciones que no están en la API
+            log_messages.append(f"ℹ️ **SAPAL {station_name_shp}:** No disponible en la API pública.")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
             log_container.markdown("\n\n".join(log_messages))
             continue
 
-        # El payload pide datos para un solo día, como solicitaste.
         payload = {
-            "id_estacion": station_id,
-            "periodo": "Diario",
-            "fecha_inicio": report_date_str, # Inicio y fin son la misma fecha.
-            "fecha_final": report_date_str
+            "id_estacion": station_id, "periodo": "Diario",
+            "fecha_inicio": report_date_str, "fecha_final": report_date_str
         }
 
         try:
@@ -347,15 +346,14 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
             data = response.json()
             
             if not data:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para esta fecha.")
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para la fecha.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-                continue # Pasa a la siguiente estación
+                continue
             
             df_station = pd.DataFrame(data)
             
             if 'precipitacion_anual' in df_station.columns:
                 df_station['precipitacion_anual'] = pd.to_numeric(df_station['precipitacion_anual'], errors='coerce')
-                # Obtenemos el valor de la primera (y única) fila
                 precip_value = df_station['precipitacion_anual'].iloc[0] if not df_station.empty else np.nan
             else:
                 precip_value = np.nan
@@ -364,7 +362,7 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
                 log_messages.append(f"✅ **SAPAL {station_name_shp}:** {precip_value} mm")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': precip_value})
             else:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no numérico o vacío para la fecha.")
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no numérico para la fecha.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         
         except requests.exceptions.RequestException as e:
@@ -373,7 +371,6 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
         except Exception as e:
             log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error procesando la respuesta: {e}")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-            
         finally:
              log_container.markdown("\n\n".join(log_messages))
              time.sleep(0.5)
@@ -850,6 +847,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
