@@ -35,7 +35,12 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.patches import Patch, Polygon
 from matplotlib.lines import Line2D
 import pyproj
-
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
 from pykrige.ok import OrdinaryKriging
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import LeaveOneOut
@@ -292,89 +297,102 @@ import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL. Versión 8.0 - Mapa de IDs corregido y alineado con el shapefile.
-    Usa el mapa estático correcto, que utiliza los nombres exactos del archivo shapefile
-    como claves para las 11 estaciones que sí están disponibles en la API pública de SAPAL.
+    Extrae datos de SAPAL usando Selenium en modo headless, configurado para Streamlit Cloud.
+    Esta versión replica la lógica del script de escritorio.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (API Pura, Mapa Corregido)... ---")
+    log_messages.append("--- Iniciando extracción de SAPAL con Selenium (headless)... ---")
     log_container.markdown("\n\n".join(log_messages))
-
-    # ¡MAPA CORREGIDO! Las claves ahora coinciden con los nombres en tu archivo shapefile.
-    # Solo estas 11 estaciones tienen datos públicos en la web de SAPAL.
-    station_id_map = {
-        'SAPAL Explora': 1,
-        'Lomas de Ibarrilla': 2,        # Asumiendo que "Lomas de Ibarrilla" en tu SHP es "P Ibarrilla" en la web
-        'Santa Rosa Plan de Ayala': 3,  # Asumiendo que "Santa Rosa Plan de Ayala" en tu SHP es "Santa Rosa" en la web
-        'Blvd Morelos-Madrazo': 4,      # Asumiendo que este es "Blvd La Luz" en la web
-        'Centro': 5,                    # Asumiendo que tu SHP lo tiene como "Centro" y no "SAPAL Centro"
-        'Cerrito de Jerez': 6,          # Asumiendo que este es "Cervantes" en la web
-        'Villas de San Juan': 7,        # Asumiendo que este es "Chapalita" en la web
-        'SAPAL Insurgentes': 8,
-        'PTA. SANTA ANA': 9,             # Nombre largo del SHP que coincide
-        'SAPAMILPA': 10,                 # Nombre largo del SHP que coincide
-        'SAPAL Torres Landa': 11,
-    }
-
-    # El formato de fecha que la API de SAPAL espera: 'YYYY-MM-DD'
-    report_date_str = report_date.strftime('%Y-%m-%d')
-    api_url = "https://www.sapal.gob.mx/jsonapi/estacion-meteorologica"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/json;charset=UTF-8",
-    }
     
-    for station_name_shp in stations:
-        # Buscamos el ID usando el nombre exacto del shapefile
-        station_id = station_id_map.get(station_name_shp)
-
-        if not station_id:
-            # Este es ahora el comportamiento esperado para las estaciones que no están en la API
-            log_messages.append(f"ℹ️ **SAPAL {station_name_shp}:** No disponible en la API pública.")
-            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-            log_container.markdown("\n\n".join(log_messages))
-            continue
-
-        payload = {
-            "id_estacion": station_id, "periodo": "Diario",
-            "fecha_inicio": report_date_str, "fecha_final": report_date_str
-        }
-
-        try:
-            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            
-            if not data:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para la fecha.")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-                continue
-            
-            df_station = pd.DataFrame(data)
-            
-            if 'precipitacion_anual' in df_station.columns:
-                df_station['precipitacion_anual'] = pd.to_numeric(df_station['precipitacion_anual'], errors='coerce')
-                precip_value = df_station['precipitacion_anual'].iloc[0] if not df_station.empty else np.nan
-            else:
-                precip_value = np.nan
-
-            if pd.notna(precip_value):
-                log_messages.append(f"✅ **SAPAL {station_name_shp}:** {precip_value} mm")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': precip_value})
-            else:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no numérico para la fecha.")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+    driver = None
+    try:
+        # --- Configuración de Selenium para el entorno de Streamlit ---
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
         
-        except requests.exceptions.RequestException as e:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de conexión a la API: {e}")
-            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        except Exception as e:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error procesando la respuesta: {e}")
-            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        finally:
-             log_container.markdown("\n\n".join(log_messages))
-             time.sleep(0.5)
+        # Le decimos a Selenium dónde está el driver que instalamos con packages.txt
+        service = Service('/usr/bin/chromedriver')
+        
+        driver = webdriver.Chrome(service=service, options=options)
+        wait = WebDriverWait(driver, 45) # Aumentamos la espera por si la red del servidor es lenta
+        
+        driver.get("https://www.sapal.gob.mx/estaciones-metereologicas")
+        
+        # Espera a que la página esté interactiva
+        wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="from"]')))
+        
+        # Seleccionar Periodo "Diario"
+        driver.find_element(By.XPATH, "(//*[contains(@class, 'MuiInputBase-input')])[2]").click()
+        wait.until(EC.element_to_be_clickable((By.XPATH, "//li[contains(text(), 'Diario')]"))).click()
+        
+        # Preparar las fechas como en tu script original
+        start_of_year_str = datetime(report_date.year, 1, 1).strftime("%d/%m/%Y")
+        end_date_str = report_date.strftime("%d/%m/%Y")
 
+        # Rellenar fechas
+        fecha_inicio = driver.find_element(By.XPATH, '//*[@id="from"]')
+        fecha_inicio.clear()
+        fecha_inicio.send_keys(start_of_year_str)
+        
+        fecha_final = driver.find_element(By.XPATH, '//*[@id="to"]')
+        driver.find_element(By.TAG_NAME, 'body').click() # Clic fuera para cerrar calendarios
+        time.sleep(0.5)
+        fecha_final.clear()
+        fecha_final.send_keys(end_date_str)
+        driver.find_element(By.TAG_NAME, 'body').click()
+        time.sleep(0.5)
+
+        # Iterar sobre las estaciones del shapefile
+        for station_name in stations:
+            try:
+                # Seleccionar la estación en el menú
+                dropdown = driver.find_element(By.XPATH, "(//*[contains(@class, 'MuiInputBase-input')])[1]")
+                dropdown.click()
+                # Esperar a que la opción de la estación sea visible y clickeable
+                station_option = wait.until(EC.element_to_be_clickable((By.XPATH, f"//li[contains(text(), '{station_name}')]")))
+                station_option.click()
+                
+                # Clic en "Ver"
+                ver_button = driver.find_element(By.XPATH, "//button[.//span[text()='Ver']]")
+                ver_button.click()
+                
+                # Espera INTELIGENTE a que la tabla se actualice.
+                # Busca la cabecera de la tabla que dice "Prec. Anual (mm)".
+                wait.until(EC.presence_of_element_located((By.XPATH, "//th[contains(., 'Prec. Anual')]")))
+                
+                # Extraer el dato
+                rows = driver.find_elements(By.CSS_SELECTOR, "tbody.MuiTableBody-root tr.MuiTableRow-root")
+                if not rows:
+                    raise ValueError("La tabla de datos está vacía.")
+                
+                last_row = rows[-1] # El valor acumulado está en la última fila
+                cells = last_row.find_elements(By.TAG_NAME, "td")
+                
+                if len(cells) < 2:
+                    raise ValueError("La fila de datos no tiene suficientes columnas.")
+                
+                precip_text = cells[1].text
+                precip = float(precip_text.replace(",", ""))
+                
+                log_messages.append(f"✅ **SAPAL {station_name}:** {precip} mm")
+                results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': precip})
+
+            except Exception as e:
+                log_messages.append(f"⚠️ **SAPAL {station_name}:** No se pudo extraer. Error: {str(e)[:100]}")
+                results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            
+            log_container.markdown("\n\n".join(log_messages))
+            
+    finally:
+        if driver:
+            driver.quit()
+        log_messages.append("--- Extracción de SAPAL finalizada. ---")
+        log_container.markdown("\n\n".join(log_messages))
+        
     return pd.DataFrame(results)
 
 
@@ -847,6 +865,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
