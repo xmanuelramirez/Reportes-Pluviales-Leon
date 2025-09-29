@@ -306,7 +306,7 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        station_cards = soup.find_all("div", class_="col-md-4 mb-4")
+        station_cards = soup.find_all("div", class_="card")
 
         if not station_cards:
             log_messages.append("⚠️ No se encontraron 'cards' de estaciones en la página SAPAL.")
@@ -843,5 +843,6 @@ else:
         
 
                     st.rerun()
+
 
 
