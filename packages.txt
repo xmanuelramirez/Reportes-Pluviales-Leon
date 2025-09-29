@@ -1,3 +1,2 @@
+# packages.txt
 gdal-bin
-libgdal-dev
-libproj-dev
