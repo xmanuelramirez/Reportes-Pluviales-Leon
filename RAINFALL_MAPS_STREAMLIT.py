@@ -287,120 +287,96 @@ from bs4 import BeautifulSoup
 import re
 
 # Asegúrate de que estas importaciones estén al principio de tu script
-from bs4 import BeautifulSoup
-import re
+
 import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL. Versión 7.0 - Réplica de la lógica de Selenium.
-    1. Obtiene dinámicamente el catálogo de estaciones (Nombre -> ID) desde el HTML.
-    2. Para cada estación, pide a la API el rango de datos desde el 1 de enero hasta la fecha del reporte.
-    3. Extrae el último valor de precipitación anual de la respuesta.
+    Extrae datos de SAPAL. Versión Definitiva - API Pura.
+    Usa un mapa estático de Nombres -> ID (ya que no se puede obtener dinámicamente)
+    y pide los datos para una fecha única.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (Réplica de Selenium con API)... ---")
+    log_messages.append("--- Iniciando extracción de SAPAL (API Pura)... ---")
     log_container.markdown("\n\n".join(log_messages))
 
+    # El mapa de Nombres a IDs es necesario porque la API no acepta nombres.
+    # Estos IDs son estables y no deberían cambiar.
+    station_id_map = {
+        'EXPLORA': 1,
+        'P. IBARRILLA': 2,
+        'SANTA ROSA': 3,
+        'BLVD. LA LUZ': 4,
+        'CENTRO': 5,
+        'CERVANTES': 6,
+        'CHAPALITA': 7,
+        'INSURGENTES': 8,
+        'PTA. SANTA ANA': 9,
+        'SAPAMILPA': 10,
+        'TORRES LANDA': 11,
+    }
+
+    # El formato de fecha que la API de SAPAL espera: 'YYYY-MM-DD'
+    report_date_str = report_date.strftime('%Y-%m-%d')
+    api_url = "https://www.sapal.gob.mx/jsonapi/estacion-meteorologica"
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Content-Type": "application/json;charset=UTF-8",
     }
     
-    # --- PASO 1: CONSTRUIR EL MAPA DE ESTACIONES DINÁMICAMENTE ---
-    station_id_map = {}
-    try:
-        main_page_url = "https://www.sapal.gob.mx/estaciones-metereologicas"
-        response_page = requests.get(main_page_url, headers=headers, timeout=30)
-        response_page.raise_for_status()
-        soup = BeautifulSoup(response_page.text, "html.parser")
-
-        def normalize_name(name):
-            return re.sub(r'\s+', ' ', name.lower().replace('.', '')).strip()
-
-        select_element = soup.find("select")
-        if not select_element:
-            raise ValueError("No se encontró el menú desplegable de estaciones en el HTML.")
-
-        options = select_element.find_all("option")
-        for option in options:
-            station_id = option.get('value')
-            web_name = option.get_text(strip=True)
-            if station_id and web_name and station_id.isdigit():
-                station_id_map[normalize_name(web_name)] = int(station_id)
-        
-        if not station_id_map:
-             raise ValueError("No se pudieron extraer estaciones del menú desplegable.")
-
-        log_messages.append(f"✅ Catálogo de {len(station_id_map)} estaciones SAPAL construido dinámicamente.")
-        log_container.markdown("\n\n".join(log_messages))
-
-    except Exception as e:
-        log_messages.append(f"⚠️ Error crítico al obtener el catálogo de estaciones SAPAL: {e}")
-        log_container.markdown("\n\n".join(log_messages))
-        for station_name in stations:
-            results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        return pd.DataFrame(results)
-
-    # --- PASO 2: PEDIR DATOS PARA CADA ESTACIÓN CON EL RANGO DE FECHAS CORRECTO ---
-    start_date_str = datetime(report_date.year, 1, 1).strftime('%Y-%m-%d')
-    end_date_str = report_date.strftime('%Y-%m-%d')
-    api_url = "https://www.sapal.gob.mx/jsonapi/estacion-meteorologica"
-
     for station_name_shp in stations:
-        normalized_shp_name = normalize_name(station_name_shp)
-        station_id = station_id_map.get(normalized_shp_name)
+        station_id = station_id_map.get(station_name_shp)
 
         if not station_id:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** No se encontró en el catálogo extraído.")
+            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** No está en el mapa de IDs. Omitiendo.")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
             log_container.markdown("\n\n".join(log_messages))
             continue
 
+        # El payload pide datos para un solo día, como solicitaste.
         payload = {
             "id_estacion": station_id,
             "periodo": "Diario",
-            "fecha_inicio": start_date_str, # Desde el 1 de enero
-            "fecha_final": end_date_str    # Hasta la fecha del reporte
+            "fecha_inicio": report_date_str, # Inicio y fin son la misma fecha.
+            "fecha_final": report_date_str
         }
 
         try:
-            response = requests.post(api_url, headers={**headers, "Content-Type": "application/json;charset=UTF-8"}, json=payload, timeout=30)
+            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             data = response.json()
             
             if not data:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para el rango de fechas.")
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para esta fecha.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-                log_container.markdown("\n\n".join(log_messages))
-                continue
+                continue # Pasa a la siguiente estación
             
             df_station = pd.DataFrame(data)
             
-            # Aseguramos que la columna exista y la convertimos a numérico
             if 'precipitacion_anual' in df_station.columns:
                 df_station['precipitacion_anual'] = pd.to_numeric(df_station['precipitacion_anual'], errors='coerce')
-                # Obtenemos el último valor válido de la serie, que corresponde al acumulado en la `end_date`
-                last_valid_precip = df_station['precipitacion_anual'].dropna().iloc[-1] if not df_station['precipitacion_anual'].dropna().empty else np.nan
+                # Obtenemos el valor de la primera (y única) fila
+                precip_value = df_station['precipitacion_anual'].iloc[0] if not df_station.empty else np.nan
             else:
-                last_valid_precip = np.nan
+                precip_value = np.nan
 
-            if pd.notna(last_valid_precip):
-                log_messages.append(f"✅ **SAPAL {station_name_shp}:** {last_valid_precip} mm")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': last_valid_precip})
+            if pd.notna(precip_value):
+                log_messages.append(f"✅ **SAPAL {station_name_shp}:** {precip_value} mm")
+                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': precip_value})
             else:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Se obtuvieron datos, pero sin valor de precipitación válido.")
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no numérico o vacío para la fecha.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         
         except requests.exceptions.RequestException as e:
             log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de conexión a la API: {e}")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        
         except Exception as e:
             log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error procesando la respuesta: {e}")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
             
-        log_container.markdown("\n\n".join(log_messages))
-        time.sleep(0.5) # Pequeña pausa cortés para no saturar su servidor
+        finally:
+             log_container.markdown("\n\n".join(log_messages))
+             time.sleep(0.5)
 
     return pd.DataFrame(results)
 
@@ -874,6 +850,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
