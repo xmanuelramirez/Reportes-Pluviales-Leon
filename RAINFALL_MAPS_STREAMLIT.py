@@ -283,7 +283,7 @@ def get_latest_conagua_date(stations):
             # st.warning(f"Error al conectar con la estación {station}: {e}")
             continue
     return None
-
+from bs4 import BeautifulSoup
 import re
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
@@ -843,4 +843,5 @@ else:
         
 
                     st.rerun()
+
 
