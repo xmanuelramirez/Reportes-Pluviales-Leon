@@ -1,1 +1,3 @@
-libgdal-dev
+chromium
+chromium-driver
+libgl1
