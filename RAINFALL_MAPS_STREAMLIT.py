@@ -288,88 +288,110 @@ import re
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL. Versión 3.0 - Robusta y sin 'name_map'.
-    Compara los nombres de la lista `stations` con los de la web de forma flexible,
-    ignorando puntos, espacios extra y mayúsculas/minúsculas.
+    Extrae datos de SAPAL. Versión 5.0 - 100% Dinámica.
+    1. Primero, obtiene dinámicamente el catálogo de estaciones y sus IDs desde la API.
+    2. Luego, para cada estación solicitada, busca su ID y pide los datos solo para la fecha del reporte.
+    No depende de ningún diccionario estático.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (lógica flexible, sin mapeo)... ---")
+    log_messages.append("--- Iniciando extracción de SAPAL (100% Dinámica)... ---")
     log_container.markdown("\n\n".join(log_messages))
 
-    url = "https://www.sapal.gob.mx/estaciones-metereologicas"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
+        "Content-Type": "application/json;charset=UTF-8",
     }
 
+    # --- PASO 1: OBTENER EL MAPEO DE ESTACIONES DINÁMICAMENTE ---
+    station_id_map = {}
     try:
-        resp = requests.get(url, headers=headers, timeout=30)
-        resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-
-        station_cards = soup.find_all("div", class_="card")
-
-        if not station_cards:
-            log_messages.append("⚠️ No se encontraron 'cards' de estaciones en la página SAPAL.")
-            log_container.markdown("\n\n".join(log_messages))
-            for station_name in stations:
-                results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-            return pd.DataFrame(results)
+        catalog_url = "https://www.sapal.gob.mx/jsonapi/estaciones-meteorologicas"
+        response_catalog = requests.get(catalog_url, headers=headers, timeout=20)
+        response_catalog.raise_for_status()
         
-        # Función auxiliar para "limpiar" los nombres y poder compararlos
+        # Función para "limpiar" nombres y poder compararlos
         def normalize_name(name):
-            # Convierte a minúsculas, quita puntos, y reemplaza múltiples espacios con uno solo
+            import re
             return re.sub(r'\s+', ' ', name.lower().replace('.', '')).strip()
 
-        # Extraemos y normalizamos todos los nombres de las tarjetas de la web una sola vez
-        web_stations_data = {}
-        for card in station_cards:
-            title_element = card.find("h5", class_="card-header")
-            if title_element:
-                web_name = title_element.get_text(strip=True)
-                normalized_web_name = normalize_name(web_name)
-                web_stations_data[normalized_web_name] = card # Guardamos la tarjeta completa
-
-        # --- LÓGICA PRINCIPAL ---
-        # Itera sobre cada estación que nos pidieron en la lista `stations` (los nombres de tu shapefile)
-        for station_shp_name in stations:
-            normalized_shp_name = normalize_name(station_shp_name)
-            
-            # Busca si el nombre normalizado de tu estación existe en los nombres normalizados de la web
-            if normalized_shp_name in web_stations_data:
-                found_card = web_stations_data[normalized_shp_name]
-                table = found_card.find("table")
-                precip = np.nan
-                if table:
-                    rows = table.find_all("tr")
-                    for row in rows:
-                        cols = [c.get_text(strip=True) for c in row.find_all("td")]
-                        if len(cols) >= 2 and str(report_date.day) in cols[0]:
-                            try:
-                                precip = float(cols[1].replace(",", ""))
-                                break
-                            except (ValueError, IndexError):
-                                precip = np.nan
-                
-                if pd.notna(precip):
-                    log_messages.append(f"✅ **SAPAL {station_shp_name}:** {precip} mm")
-                else:
-                    log_messages.append(f"⚠️ **SAPAL {station_shp_name}:** Encontrado en la web, pero sin dato para el día {report_date.day}.")
-                
-                results.append({'Name': station_shp_name, 'ENTIDAD': 'SAPAL', 'P_mm': precip})
-
-            else:
-                # Si después de normalizar, no se encuentra
-                log_messages.append(f"⚠️ **SAPAL {station_shp_name}:** No se encontró en la página web.")
-                results.append({'Name': station_shp_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-
-            log_container.markdown("\n\n".join(log_messages))
-
-    except Exception as e:
-        log_messages.append(f"⚠️ Error crítico en scraping SAPAL: {e}")
+        # Construir el mapa dinámico: Nombre Normalizado -> ID
+        for station_data in response_catalog.json():
+            web_name = station_data.get('nombre')
+            station_id = station_data.get('id_estacion')
+            if web_name and station_id:
+                station_id_map[normalize_name(web_name)] = station_id
+        
+        log_messages.append("✅ Catálogo de estaciones SAPAL obtenido dinámicamente.")
         log_container.markdown("\n\n".join(log_messages))
+
+    except requests.exceptions.RequestException as e:
+        log_messages.append(f"⚠️ Error crítico: No se pudo obtener el catálogo de estaciones de SAPAL. {e}")
+        log_container.markdown("\n\n".join(log_messages))
+        # Si no podemos obtener el catálogo, no podemos continuar.
         for station_name in stations:
-            if not any(d['Name'] == station_name for d in results):
-                 results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+        return pd.DataFrame(results)
+
+    # --- PASO 2: PEDIR DATOS PARA CADA ESTACIÓN CON LA FECHA ÚNICA ---
+    
+    # La fecha debe tener el formato 'YYYY-MM-DD'
+    report_date_str = report_date.strftime('%Y-%m-%d')
+    api_url = "https://www.sapal.gob.mx/jsonapi/estacion-meteorologica"
+
+    for station_name_shp in stations:
+        # Normaliza el nombre de tu shapefile para buscarlo en nuestro mapa dinámico
+        normalized_shp_name = normalize_name(station_name_shp)
+        station_id = station_id_map.get(normalized_shp_name)
+
+        if not station_id:
+            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** No se encontró su ID en el catálogo dinámico.")
+            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            log_container.markdown("\n\n".join(log_messages))
+            continue
+
+        # El payload ahora pide datos para un solo día.
+        payload = {
+            "id_estacion": station_id,
+            "periodo": "Diario",
+            "fecha_inicio": report_date_str, # La fecha de inicio es la misma que la final
+            "fecha_final": report_date_str
+        }
+
+        try:
+            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            
+            if not data:
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para la fecha solicitada.")
+                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                log_container.markdown("\n\n".join(log_messages))
+                continue
+            
+            # La API devuelve una lista, tomamos el primer (y único) resultado
+            df_station = pd.DataFrame(data)
+
+            # Buscamos el acumulado anual de ese día
+            df_station['precipitacion_anual'] = pd.to_numeric(df_station['precipitacion_anual'], errors='coerce')
+            precip_value = df_station['precipitacion_anual'].iloc[0] if not df_station.empty else np.nan
+
+            if pd.notna(precip_value):
+                log_messages.append(f"✅ **SAPAL {station_name_shp}:** {precip_value} mm")
+                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': precip_value})
+            else:
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no numérico o vacío para la fecha.")
+                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+        
+        except requests.exceptions.RequestException as e:
+            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de conexión a la API: {e}")
+            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+        
+        except (KeyError, IndexError, Exception) as e:
+            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error procesando la respuesta: {e}")
+            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            
+        log_container.markdown("\n\n".join(log_messages))
+        time.sleep(0.5)
 
     return pd.DataFrame(results)
 
@@ -843,6 +865,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
