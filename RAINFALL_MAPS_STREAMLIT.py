@@ -36,14 +36,6 @@ from matplotlib.patches import Patch, Polygon
 from matplotlib.lines import Line2D
 import pyproj
 
-# LIBRERÍAS DE WEB SCRAPING Y GEOESPACIAL
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-
 from pykrige.ok import OrdinaryKriging
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import LeaveOneOut
@@ -291,81 +283,71 @@ def get_latest_conagua_date(stations):
             # st.warning(f"Error al conectar con la estación {station}: {e}")
             continue
     return None
+
+from bs4 import BeautifulSoup
+
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
-    """Realiza web scraping en SAPAL, adaptando la lógica robusta de R con pausas fijas."""
+    """
+    Extrae datos de SAPAL directamente con requests (sin Selenium).
+    Busca en la tabla diaria de cada estación y captura la precipitación.
+    """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL... ---")
+    log_messages.append("--- Iniciando extracción de SAPAL (requests) ---")
     log_container.markdown("\n\n".join(log_messages))
-    
-    st.warning(
-        "⚠️ **ACCIÓN REQUERIDA:** Se abrirá una ventana de Chrome para extraer los datos."
-        "\n\n**Por favor, no cierre esta ventana ni interactúe con ella.** El proceso es automático y la ventana se cerrará sola al terminar."
-    )
-    
-    driver = None
+
+    url = "https://www.sapal.gob.mx/estaciones-metereologicas"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/118.0.0.0 Safari/537.36"
+        )
+    }
+
     try:
-        service = ChromeService(ChromeDriverManager().install())
-        
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless") # Ejecutar sin interfaz gráfica
-        options.add_argument("--no-sandbox") # Requerido en entornos Linux
-        options.add_argument("--disable-dev-shm-usage") # Evita problemas de memoria compartida
-        options.add_argument("--disable-gpu") # No hay GPU en el servidor
-        options.add_argument("--window-size=1920,1080") # Define un tamaño de ventana virtual
-        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36')
+        resp = requests.get(url, headers=headers, timeout=20)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
 
-        driver = webdriver.Chrome(service=service, options=options)
-        wait = WebDriverWait(driver, 45)
-        
-        driver.get("https://www.sapal.gob.mx/estaciones-metereologicas")
-        
-        wait.until(EC.element_to_be_clickable((By.XPATH, '//*[@id="from"]')))
-        
-        wait.until(EC.element_to_be_clickable((By.XPATH, "(//*[contains(@class, 'MuiInputBase-input')])[2]"))).click()
-        wait.until(EC.element_to_be_clickable((By.XPATH, "//li[contains(text(), 'Diario')]"))).click()
-        
-        start_of_year_str = datetime(report_date.year, 1, 1).strftime("%d%m%Y")
-        end_date_str = report_date.strftime("%d%m%Y")
-
-        fecha_inicio = driver.find_element(By.XPATH, '//*[@id="from"]')
-        fecha_inicio.click(); fecha_inicio.clear(); fecha_inicio.send_keys(start_of_year_str)
-        fecha_final = driver.find_element(By.XPATH, '//*[@id="to"]')
-        fecha_final.click(); fecha_final.clear(); fecha_final.send_keys(end_date_str)
-
-        for station in stations:
-            try:
-                time.sleep(1)
-
-                dropdown = driver.find_element(By.XPATH, "(//*[contains(@class, 'MuiInputBase-input')])[1]")
-                dropdown.click()
-                time.sleep(0.5)
-                
-                station_element = driver.find_element(By.XPATH, f"//li[contains(text(), '{station}')]")
-                station_element.click()
-                time.sleep(0.5)
-                
-                ver_button = driver.find_element(By.XPATH, "//button[.//span[text()='Ver']]")
-                ver_button.click()
-                
-                time.sleep(1.5)
-                
-                elements = driver.find_elements(By.CSS_SELECTOR, "td.MuiTableCell-root div")
-                precip_text = elements[7].text if len(elements) >= 8 else '0'
-                precip = float(precip_text.replace(",", ""))
-                results.append({'Name': station, 'ENTIDAD': 'SAPAL', 'P_mm': precip})
-                log_messages.append(f"✅ **SAPAL {station}:** {precip} mm")
-
-            except Exception as e:
-                log_messages.append(f"⚠️ **SAPAL {station}:** Error. Se registrará como N/A.")
-                results.append({'Name': station, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-            
+        # Buscar tablas
+        tables = soup.find_all("table")
+        if not tables:
+            log_messages.append("⚠️ No se encontraron tablas en la página SAPAL.")
             log_container.markdown("\n\n".join(log_messages))
-    finally:
-        if driver:
-            driver.quit()
-        log_messages.append("--- Extracción de SAPAL finalizada. ---")
+            return pd.DataFrame(results)
+
+        # Procesar cada estación solicitada
+        for station in stations:
+            precip = None
+            for table in tables:
+                if station.lower() in table.get_text(strip=True).lower():
+                    rows = table.find_all("tr")
+                    for row in rows:
+                        cols = [c.get_text(strip=True) for c in row.find_all("td")]
+                        if len(cols) >= 2 and str(report_date.day) in cols[0]:
+                            try:
+                                precip = float(cols[1].replace(",", ""))
+                            except:
+                                precip = None
+                            break
+                if precip is not None:
+                    break
+
+            if precip is None:
+                log_messages.append(f"⚠️ **SAPAL {station}:** No disponible.")
+                results.append({'Name': station, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            else:
+                log_messages.append(f"✅ **SAPAL {station}:** {precip} mm")
+                results.append({'Name': station, 'ENTIDAD': 'SAPAL', 'P_mm': precip})
+
+            log_container.markdown("\n\n".join(log_messages))
+
+    except Exception as e:
+        log_messages.append(f"⚠️ Error global en scraping SAPAL: {e}")
         log_container.markdown("\n\n".join(log_messages))
+
     return pd.DataFrame(results)
+
 
 def filter_outliers(gdf, column='P_mm'):
     Q1 = gdf[column].quantile(0.25); Q3 = gdf[column].quantile(0.75)
@@ -834,4 +816,5 @@ else:
                         "metrics_df": metrics_df
                     }
         
+
                     st.rerun()
