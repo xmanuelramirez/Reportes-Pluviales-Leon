@@ -1,2 +1,1 @@
-# packages.txt
 gdal-bin
