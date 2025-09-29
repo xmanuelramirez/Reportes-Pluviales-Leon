@@ -284,67 +284,92 @@ def get_latest_conagua_date(stations):
             continue
     return None
 
-from bs4 import BeautifulSoup
+import re
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL directamente con requests (sin Selenium).
-    Busca en la tabla diaria de cada estación y captura la precipitación.
+    Extrae datos de SAPAL. Versión 3.0 - Robusta y sin 'name_map'.
+    Compara los nombres de la lista `stations` con los de la web de forma flexible,
+    ignorando puntos, espacios extra y mayúsculas/minúsculas.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (requests) ---")
+    log_messages.append("--- Iniciando extracción de SAPAL (lógica flexible, sin mapeo)... ---")
     log_container.markdown("\n\n".join(log_messages))
 
     url = "https://www.sapal.gob.mx/estaciones-metereologicas"
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/118.0.0.0 Safari/537.36"
-        )
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36"
     }
 
     try:
-        resp = requests.get(url, headers=headers, timeout=20)
+        resp = requests.get(url, headers=headers, timeout=30)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # Buscar tablas
-        tables = soup.find_all("table")
-        if not tables:
-            log_messages.append("⚠️ No se encontraron tablas en la página SAPAL.")
-            log_container.markdown("\n\n".join(log_messages))
-            return pd.DataFrame(results)
+        station_cards = soup.find_all("div", class_="col-md-4 mb-4")
 
-        # Procesar cada estación solicitada
-        for station in stations:
-            precip = None
-            for table in tables:
-                if station.lower() in table.get_text(strip=True).lower():
+        if not station_cards:
+            log_messages.append("⚠️ No se encontraron 'cards' de estaciones en la página SAPAL.")
+            log_container.markdown("\n\n".join(log_messages))
+            for station_name in stations:
+                results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            return pd.DataFrame(results)
+        
+        # Función auxiliar para "limpiar" los nombres y poder compararlos
+        def normalize_name(name):
+            # Convierte a minúsculas, quita puntos, y reemplaza múltiples espacios con uno solo
+            return re.sub(r'\s+', ' ', name.lower().replace('.', '')).strip()
+
+        # Extraemos y normalizamos todos los nombres de las tarjetas de la web una sola vez
+        web_stations_data = {}
+        for card in station_cards:
+            title_element = card.find("h5", class_="card-header")
+            if title_element:
+                web_name = title_element.get_text(strip=True)
+                normalized_web_name = normalize_name(web_name)
+                web_stations_data[normalized_web_name] = card # Guardamos la tarjeta completa
+
+        # --- LÓGICA PRINCIPAL ---
+        # Itera sobre cada estación que nos pidieron en la lista `stations` (los nombres de tu shapefile)
+        for station_shp_name in stations:
+            normalized_shp_name = normalize_name(station_shp_name)
+            
+            # Busca si el nombre normalizado de tu estación existe en los nombres normalizados de la web
+            if normalized_shp_name in web_stations_data:
+                found_card = web_stations_data[normalized_shp_name]
+                table = found_card.find("table")
+                precip = np.nan
+                if table:
                     rows = table.find_all("tr")
                     for row in rows:
                         cols = [c.get_text(strip=True) for c in row.find_all("td")]
                         if len(cols) >= 2 and str(report_date.day) in cols[0]:
                             try:
                                 precip = float(cols[1].replace(",", ""))
-                            except:
-                                precip = None
-                            break
-                if precip is not None:
-                    break
+                                break
+                            except (ValueError, IndexError):
+                                precip = np.nan
+                
+                if pd.notna(precip):
+                    log_messages.append(f"✅ **SAPAL {station_shp_name}:** {precip} mm")
+                else:
+                    log_messages.append(f"⚠️ **SAPAL {station_shp_name}:** Encontrado en la web, pero sin dato para el día {report_date.day}.")
+                
+                results.append({'Name': station_shp_name, 'ENTIDAD': 'SAPAL', 'P_mm': precip})
 
-            if precip is None:
-                log_messages.append(f"⚠️ **SAPAL {station}:** No disponible.")
-                results.append({'Name': station, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
             else:
-                log_messages.append(f"✅ **SAPAL {station}:** {precip} mm")
-                results.append({'Name': station, 'ENTIDAD': 'SAPAL', 'P_mm': precip})
+                # Si después de normalizar, no se encuentra
+                log_messages.append(f"⚠️ **SAPAL {station_shp_name}:** No se encontró en la página web.")
+                results.append({'Name': station_shp_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
 
             log_container.markdown("\n\n".join(log_messages))
 
     except Exception as e:
-        log_messages.append(f"⚠️ Error global en scraping SAPAL: {e}")
+        log_messages.append(f"⚠️ Error crítico en scraping SAPAL: {e}")
         log_container.markdown("\n\n".join(log_messages))
+        for station_name in stations:
+            if not any(d['Name'] == station_name for d in results):
+                 results.append({'Name': station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
 
     return pd.DataFrame(results)
 
@@ -818,3 +843,4 @@ else:
         
 
                     st.rerun()
+
