@@ -297,71 +297,74 @@ import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL. Versión 10.0 - Definitiva.
-    - Mapa de IDs corregido con los nombres exactos del shapefile.
-    - Formato de fecha corregido a DD/MM/YYYY, que es lo que la API espera.
+    Extrae datos de SAPAL. Versión 13.0 - API Nueva con mapeo de nombres refinado.
+    Utiliza la nueva API que acepta nombres, con una función interna que traduce
+    los nombres del shapefile a los nombres cortos que la API espera.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (API Pura, Mapa y Fechas Corregidas)... ---")
+    log_messages.append("--- Iniciando extracción de SAPAL (API Dinámica, Mapeo Refinado)... ---")
     log_container.markdown("\n\n".join(log_messages))
 
-    # ¡MAPA FINAL Y CORRECTO!
-    # Las claves son los nombres exactos de tu shapefile para las 11 estaciones públicas.
-    station_id_map = {
-        'SAPAL Explora': 1,
-        'Lomas de Ibarrilla': 2,
-        'Santa Rosa Plan de Ayala': 3,
-        'Blvd Morelos-Madrazo': 4,
-        'Centro': 5, # Basado en tu log, parece que este es solo "Centro" en tu SHP. Si es "SAPAL Centro", ajústalo.
-        'Cerrito de Jerez': 6,
-        'Villas de San Juan': 7,
-        'SAPAL Insurgentes': 8,
-        'PTA. SANTA ANA': 9,
-        'SAPAMILPA': 10,
-        'SAPAL Torres Landa': 11,
-    }
-
-    # ¡FORMATO DE FECHA CORREGIDO! La API espera DD/MM/YYYY.
-    start_date_str = datetime(report_date.year, 1, 1).strftime('%d/%m/%Y')
-    end_date_str = report_date.strftime('%d/%m/%Y')
-    
-    api_url = "https://www.sapal.gob.mx/jsonapi/estacion-meteorologica"
+    api_url = "https://www.sapal.gob.mx/api/v1/estaciones/concentrado"
+    report_date_str = report_date.strftime('%d-%m-%Y')
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/json;charset=UTF-8",
+        "Referer": "https://www.sapal.gob.mx/estaciones-meteorologicas",
     }
     
-    for station_name_shp in stations:
-        station_id = station_id_map.get(station_name_shp)
+    # --- FUNCIÓN TRADUCTORA MEJORADA ---
+    # Traduce los nombres de tu shapefile a los 11 nombres que la API pública entiende.
+    def get_api_name(shp_name):
+        name_lower = shp_name.lower()
+        
+        # Mapeo basado en palabras clave, ahora más preciso gracias a tu imagen.
+        if "explora" in name_lower: return "Explora"
+        if "ibarrilla" in name_lower: return "P Ibarrilla"
+        if "santa rosa" in name_lower: return "Santa Rosa"
+        if "morelos-madrazo" in name_lower: return "Blvd La Luz" # Este es el mapeo más probable
+        if name_lower == "centro": return "Centro"
+        if "jerez" in name_lower: return "Cervantes"
+        if "san juan" in name_lower: return "Chapalita"
+        if "insurgentes" in name_lower: return "Insurgentes"
+        if "pta. santa ana" in name_lower or "pta sta ana" in name_lower: return "Pta Sta Ana"
+        if "sapamilpa" in name_lower: return "Sapamilpa"
+        if "torres landa" in name_lower: return "Torres Landa"
+        
+        # Si no coincide con ninguna de las 11 públicas, devuelve None
+        return None 
 
-        if not station_id:
+    for station_name_shp in stations:
+        api_station_name = get_api_name(station_name_shp)
+
+        if not api_station_name:
+            # Comportamiento esperado: Marca las estaciones no públicas como no disponibles.
             log_messages.append(f"ℹ️ **SAPAL {station_name_shp}:** No es una estación pública en la API.")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
             log_container.markdown("\n\n".join(log_messages))
             continue
 
         payload = {
-            "id_estacion": station_id,
-            "periodo": "Diario",
-            "fecha_inicio": start_date_str,
-            "fecha_final": end_date_str
+            "location": api_station_name, "period": "D",
+            "startDate": report_date_str, "endDate": report_date_str
         }
 
         try:
             response = requests.post(api_url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             data = response.json()
+            registros = data.get("registro")
             
-            if not data:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos.")
+            if not registros:
+                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para la fecha.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
                 continue
             
-            df_station = pd.DataFrame(data)
+            df_station = pd.DataFrame(registros)
             
-            if 'precipitacion_anual' in df_station.columns:
-                df_station['precipitacion_anual'] = pd.to_numeric(df_station['precipitacion_anual'], errors='coerce')
-                last_valid_precip = df_station['precipitacion_anual'].dropna().iloc[-1] if not df_station['precipitacion_anual'].dropna().empty else np.nan
+            if 'precipitacionanual' in df_station.columns:
+                df_station['precipitacionanual'] = pd.to_numeric(df_station['precipitacionanual'], errors='coerce')
+                last_valid_precip = df_station['precipitacionanual'].dropna().iloc[-1] if not df_station['precipitacionanual'].dropna().empty else np.nan
             else:
                 last_valid_precip = np.nan
 
@@ -372,15 +375,12 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
                 log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no válido en la respuesta.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         
-        except requests.exceptions.RequestException as e:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de conexión: {e}")
-            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        except Exception as e:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error procesando la respuesta: {e}")
+        except (requests.exceptions.RequestException, ValueError) as e:
+            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de API: {e}")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         finally:
              log_container.markdown("\n\n".join(log_messages))
-             time.sleep(0.5)
+             time.sleep(0.2)
 
     return pd.DataFrame(results)
 
@@ -853,6 +853,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
