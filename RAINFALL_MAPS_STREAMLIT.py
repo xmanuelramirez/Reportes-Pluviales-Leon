@@ -53,8 +53,10 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 # --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 # 1. ESTABLECER LA CONFIGURACIÓN DE LA PÁGINA (DEBE SER EL PRIMER COMANDO DE STREAMLIT)
 st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
+# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (ACTUALIZADO) ---
 st.markdown("""
 <style>
+/* --- ESTILO PARA BOTONES PRINCIPALES --- */
 /* Apunta al botón principal (el que tiene el fondo de color) */
 div[data-testid="stButton"] > button {
     background-color: #0D6AB7; /* Azul SAPAL */
@@ -67,8 +69,16 @@ div[data-testid="stButton"] > button:hover {
     color: white;
     border: 1px solid #0A5591;
 }
+
+/* --- ESTILO PARA BOTONES DE OPCIÓN (RADIO) --- */
+/* Apunta al círculo de color del radio button cuando está seleccionado */
+div[data-testid="stRadio"] input:checked + div > span {
+    background-color: #0D6AB7 !important; /* Forza el color azul SAPAL */
+    border-color: #0D6AB7 !important;     /* Forza el borde azul SAPAL */
+}
 </style>
 """, unsafe_allow_html=True)
+# --- FIN DEL BLOQUE DE ESTILOS ---
 
 # --- INICIALIZACIÓN DE ESTADO DE SESIÓN Y OTRAS CONFIGURACIONES ---
 os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
@@ -519,10 +529,24 @@ if st.session_state.map_generated:
         display_sidebar_info()
         
         st.header("Descargar Resultados")
-        st.download_button("📥 Descargar Datos Geoespaciales (.tif)", st.session_state.raster_io, f"Precipitacion_{st.session_state.report_date_str}.tif", "image/tiff", use_container_width=True)
-        st.download_button("📥 Descargar Imagen del Mapa (.png)", st.session_state.png_buffer, f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", "image/png", use_container_width=True)
         
-        with st.expander("📊 Ver Resumen y Detalles de los Datos"):
+        # --- BOTONES CORREGIDOS ---
+        # Se eliminó el parámetro 'use_container_width=True' y los emojis.
+        st.download_button(
+            "Descargar Datos Geoespaciales (.tif)", 
+            st.session_state.raster_io, 
+            f"Precipitacion_{st.session_state.report_date_str}.tif", 
+            "image/tiff"
+        )
+        st.download_button(
+            "Descargar Imagen del Mapa (.png)", 
+            st.session_state.png_buffer, 
+            f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", 
+            "image/png"
+        )
+        
+        # Se eliminó el emoji del expander para consistencia.
+        with st.expander("Ver Resumen y Detalles de los Datos"):
             if st.session_state.stats_panel_md:
                 stats = st.session_state.stats_panel_md
                 st.markdown(stats["header"])
@@ -537,12 +561,13 @@ if st.session_state.map_generated:
                     st.subheader("Rendimiento de Interpolación")
                     st.dataframe(stats["metrics_df"].set_index('Método'))
         
-        if st.button("🔄 Realizar Otro Análisis", use_container_width=True):
+        # Se eliminó 'use_container_width=True' y el emoji.
+        if st.button("Realizar Otro Análisis"):
             reset_analysis()
             st.rerun()
 
     with col_mapa:
-        st.success("✔️ ¡Reporte generado con éxito!")
+        st.info("✔️ ¡Reporte generado con éxito!")
         st.header("Mapa de Distribución Pluvial")
         st.pyplot(st.session_state.figure)
 
@@ -737,6 +762,7 @@ else:
         st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
         # Opcional: Mostrar una imagen de fondo o el logo
         
+
 
 
 
