@@ -485,52 +485,54 @@ def reset_analysis():
     st.session_state.map_generated = False
 
 if st.session_state.map_generated:
-    # --- VISTA DE RESULTADOS ---
-    col1, col2 = st.columns([2, 1])
-
-    # --- COLUMNA 1: MAPA Y ACCIONES ---
-    with col1:
-        st.success("✔️ ¡Reporte generado con éxito!")
-        st.header("3. Mapa de Distribución Pluvial")
-        st.pyplot(st.session_state.figure)
-        
-        st.header("4. Descargar Resultados")
-        dl_col1, dl_col2 = st.columns(2)
-        with dl_col1:
-            st.download_button("📥 Descargar Datos Geoespaciales (.tif)", st.session_state.raster_io, f"Precipitacion_{st.session_state.report_date_str}.tif", "image/tiff")
-        with dl_col2:
-            st.download_button("📥 Descargar Imagen del Mapa (.png)", st.session_state.png_buffer, f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", "image/png")
-        
-        if st.button("🔄 Realizar Otro Análisis"):
-            reset_analysis()
-            st.rerun()
+    # --- VISTA DE RESULTADOS (MODIFICADA) ---
+    st.success("✔️ ¡Reporte generado con éxito!")
     
-    # --- COLUMNA 2: ESTADÍSTICAS Y DETALLES (CORREGIDO) ---
-    # Este bloque ahora está fuera del if st.button, al nivel correcto.
-    with col2:
+    # El mapa y los botones ahora usan el ancho completo para mejor visibilidad
+    st.header("3. Mapa de Distribución Pluvial")
+    st.pyplot(st.session_state.figure)
+    
+    st.header("4. Descargar Resultados")
+    dl_col1, dl_col2 = st.columns(2)
+    with dl_col1:
+        st.download_button("📥 Descargar Datos Geoespaciales (.tif)", st.session_state.raster_io, f"Precipitacion_{st.session_state.report_date_str}.tif", "image/tiff")
+    with dl_col2:
+        st.download_button("📥 Descargar Imagen del Mapa (.png)", st.session_state.png_buffer, f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", "image/png")
+    
+    # --- PANEL DE ESTADÍSTICAS EN UN EXPANDER (DEBAJO DEL MAPA) ---
+    with st.expander("📊 Ver Resumen y Detalles de los Datos"):
         if st.session_state.stats_panel_md:
             stats = st.session_state.stats_panel_md
             st.markdown(stats["header"])
-            with st.expander("Ver detalles de los datos", expanded=True): # Lo pongo expandido por defecto
-                st.subheader("Datos Crudos Extraídos")
-                st.dataframe(stats["total_df_con_na"].set_index('Name'))
-                if not stats["outliers_df"].empty:
-                    st.subheader("Valores Atípicos Excluidos")
-                    st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
-                st.subheader("Estadísticas Descriptivas")
-                st.dataframe(stats["desc_stats"])
-                if stats["metrics_df"] is not None:
-                    st.subheader("Rendimiento de Interpolación")
-                    st.dataframe(stats["metrics_df"].set_index('Método'))
+            st.subheader("Datos Crudos Extraídos")
+            st.dataframe(stats["total_df_con_na"].set_index('Name'))
+            if not stats["outliers_df"].empty:
+                st.subheader("Valores Atípicos Excluidos")
+                st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
+            st.subheader("Estadísticas Descriptivas")
+            st.dataframe(stats["desc_stats"])
+            if stats["metrics_df"] is not None:
+                st.subheader("Rendimiento de Interpolación")
+                st.dataframe(stats["metrics_df"].set_index('Método'))
+
+    if st.button("🔄 Realizar Otro Análisis"):
+        reset_analysis()
+        st.rerun()
 else:
-    # --- VISTA DE CONFIGURACIÓN ---
-    col1, _ = st.columns([2, 1])
-    with col1:
-        st.header("1. Selecciona el tipo de reporte")
-        report_option = st.radio("Elige las estaciones a incluir:", ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'), index=1, key="report_option")
-        st.info("Añadir las estaciones de CONAGUA mejora la precisión del mapa, especialmente en los límites del municipio.")
-        
-        st.header("2. Confirma la fecha del reporte")
+    # --- VISTA DE CONFIGURACIÓN (MODIFICADA) ---
+    st.header("1. Selecciona el tipo de reporte")
+    report_option = st.radio(
+        "Elige las estaciones a incluir:",
+        ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'),
+        index=1,
+        key="report_option"
+    )
+    st.info("Añadir las estaciones de CONAGUA mejora la precisión del mapa, especialmente en los límites del municipio.")
+    
+    st.header("2. Confirma la fecha del reporte")
+    report_date = None
+    if report_option == 'Solo Estaciones SAPAL':
+        # ... (el resto del código de esta sección no necesita cambios, solo su indentación)
         report_date = None
         if report_option == 'Solo Estaciones SAPAL':
             report_date = datetime.now()
@@ -852,6 +854,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
