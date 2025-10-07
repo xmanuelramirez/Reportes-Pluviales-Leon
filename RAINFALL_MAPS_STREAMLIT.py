@@ -50,47 +50,36 @@ from rasterio.transform import from_origin
 from rasterio.plot import show
 warnings.simplefilter('ignore', InsecureRequestWarning)
 # --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
+# --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
+# 1. ESTABLECER LA CONFIGURACIÓN DE LA PÁGINA (DEBE SER EL PRIMER COMANDO DE STREAMLIT)
 st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
-st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
-
-# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS ---
 st.markdown("""
 <style>
-/* Apunta al botón principal de Streamlit (el que tiene el fondo de color) */
+/* Apunta al botón principal (el que tiene el fondo de color) */
 div[data-testid="stButton"] > button {
-    background-color: #0D6AB7;
+    background-color: #0D6AB7; /* Azul SAPAL */
     color: white;
     border: 1px solid #0D6AB7;
 }
 /* Estilo para cuando el cursor está sobre el botón */
 div[data-testid="stButton"] > button:hover {
-    background-color: #0A5591; /* Un azul un poco más oscuro para el efecto hover */
+    background-color: #0A5591; /* Azul más oscuro */
     color: white;
-    border: 1px solid #0A5591;
-}
-/* Apunta a los botones secundarios (como los de descarga) */
-div[data-testid="stDownloadButton"] > button {
-    background-color: #FFFFFF;
-    color: #0D6AB7;
-    border: 1px solid #0D6AB7;
-}
-div[data-testid="stDownloadButton"] > button:hover {
-    background-color: #F0F2F6;
-    color: #0A5591;
     border: 1px solid #0A5591;
 }
 </style>
 """, unsafe_allow_html=True)
-# --- FIN DEL BLOQUE DE ESTILOS ---
 
+# --- INICIALIZACIÓN DE ESTADO DE SESIÓN Y OTRAS CONFIGURACIONES ---
 os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
-# ... el resto de tu código sigue igual
-os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
+
+# Intenta configurar el idioma y muestra la advertencia si falla (esto ya es seguro)
 try:
     locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
 except locale.Error:
     st.warning("No se pudo configurar el idioma a español.")
 
+# Inicializa el estado de la sesión si no existe
 if 'map_generated' not in st.session_state:
     st.session_state.map_generated = False
     st.session_state.figure = None
@@ -99,6 +88,7 @@ if 'map_generated' not in st.session_state:
     st.session_state.report_date_str = ""
     st.session_state.stats_panel_md = None
 
+# Ahora el resto de la interfaz puede comenzar
 st.title("💧 Generador de Reportes Pluviales para León, Gto.")
 # --- FUNCIONES CORE ---
 def add_north_arrow(ax, x=0.92, y=0.92, size=0.04, text_size=10):
@@ -575,13 +565,13 @@ else:
 
         if report_option == 'Solo Estaciones SAPAL':
             report_date = datetime.now()
-            st.success(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
+            st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
         else:
             with st.spinner("Buscando la última fecha de CONAGUA..."):
                 latest_conagua_date = get_latest_conagua_date(locations_conagua)
             if latest_conagua_date:
                 report_date = latest_conagua_date
-                st.success(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
+                st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
             else:
                 report_date = datetime.now()
                 st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
@@ -747,5 +737,6 @@ else:
         st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
         # Opcional: Mostrar una imagen de fondo o el logo
         
+
 
 
