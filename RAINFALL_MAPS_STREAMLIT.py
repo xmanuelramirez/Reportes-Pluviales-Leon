@@ -758,10 +758,11 @@ else:
                     st.rerun()
 
     with col_mapa:
-        st.markdown("### El mapa se mostrará aquí una vez que generes el reporte.")
+        st.markdown("El mapa se mostrará aquí una vez que generes el reporte.")
         st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
         # Opcional: Mostrar una imagen de fondo o el logo
         
+
 
 
 
