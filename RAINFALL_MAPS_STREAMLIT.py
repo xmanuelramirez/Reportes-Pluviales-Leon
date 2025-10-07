@@ -670,56 +670,146 @@ else:
             st.rerun()
 
         # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa)
+        # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa con Diseño Original)
         elif st.session_state.progress_percent == 90:
+            # Recuperamos todas las variables necesarias del estado de la sesión
             stations_filtered_gdf = st.session_state.stations_filtered_gdf
             interpolation_results = st.session_state.interpolation_results
+            outliers_df = st.session_state.outliers_df
+            total_df_con_na = st.session_state.total_df_con_na
+            metrics_df = st.session_state.metrics_df
+            report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+
+            # --- INICIO DE TU CÓDIGO DE PLOTEO ORIGINAL RESTAURADO ---
+            fig, ax = plt.subplots(figsize=(16, 12), facecolor='white') # Restaurado a (16, 12)
+            ax.set_facecolor('white')
+            fig.patch.set_facecolor('white')
+            fig.subplots_adjust(right=0.7)
             
-            fig, ax = plt.subplots(figsize=(12, 9), facecolor='white')
-            # ... (Aquí va todo el CÓDIGO DE PLOTEO que ya tenías, no lo copio aquí por brevedad, pero debe estar)
-            ax.set_facecolor('white'); fig.patch.set_facecolor('white'); fig.subplots_adjust(right=0.7)
-            limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs); cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
-            lim_bounds = limite_gdf.total_bounds; cue_bounds = cuenca_gdf.total_bounds
-            total_minx, total_miny, total_maxx, total_maxy = min(lim_bounds[0], cue_bounds[0]), min(lim_bounds[1], cue_bounds[1]), max(lim_bounds[2], cue_bounds[2]), max(lim_bounds[3], cue_bounds[3])
-            total_width, total_height = total_maxx - total_minx, total_maxy - total_miny
-            x_margin, y_margin = total_width * 0.05, total_height * 0.05
-            ax.set_xlim(total_minx - x_margin, total_maxx + x_margin); ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
+            limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
+            cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
+            
+            lim_bounds = limite_gdf.total_bounds
+            cue_bounds = cuenca_gdf.total_bounds
+            
+            total_minx = min(lim_bounds[0], cue_bounds[0])
+            total_miny = min(lim_bounds[1], cue_bounds[1])
+            total_maxx = max(lim_bounds[2], cue_bounds[2])
+            total_maxy = max(lim_bounds[3], cue_bounds[3])
+            
+            total_width = total_maxx - total_minx
+            total_height = total_maxy - total_miny
+            x_margin = total_width * 0.05
+            y_margin = total_height * 0.05
+            
+            ax.set_xlim(total_minx - x_margin, total_maxx + x_margin)
+            ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
+            
             boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
             clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
-            hillshade_data = clipped_hillshade[0].astype(float); hillshade_data[hillshade_data == 255] = np.nan
-            ax.imshow(hillshade_data, extent=[clipped_transform[2], clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1], clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0], clipped_transform[5]], cmap='gray', alpha=0.7, aspect='equal', zorder=1)
+            hillshade_data = clipped_hillshade[0].astype(float)
+            hillshade_data[hillshade_data == 255] = np.nan
+            
+            ax.imshow(hillshade_data,
+                           extent=[clipped_transform[2],
+                                   clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1],
+                                   clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0],
+                                   clipped_transform[5]],
+                           cmap='gray', alpha=0.7, aspect='equal', zorder=1)
+            
             if interpolation_results and np.any(interpolation_results["raster_image"]):
-                raster_image = np.ma.masked_invalid(interpolation_results["raster_image"]); raster_meta = interpolation_results["raster_meta"]
+                raster_image = np.ma.masked_invalid(interpolation_results["raster_image"])
+                raster_meta = interpolation_results["raster_meta"]
                 custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
-                precip_min, precip_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
+                precip_min = stations_filtered_gdf['P_mm'].min()
+                precip_max = stations_filtered_gdf['P_mm'].max()
                 show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
                 raster_io = interpolation_results['raster_io']
-            else: raster_io = None
-            streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs); streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
-            for spine in ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
+            else:
+                raster_io = None
+            
+            streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs)
+            streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
+            
+            for spine in ax.spines.values():
+                spine.set_edgecolor('black')
+                spine.set_linewidth(1)
+            
             geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
             geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
-            geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF8C00', linewidth=1.5, clip_on=False, zorder=4)
+            geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, clip_on=False, zorder=4) # Color rojo original
             geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
+            
             if not stations_filtered_gdf.empty:
                 stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
                 stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
-            report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+
             ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
-            # ... hasta fig.savefig ...
-            png_buffer = io.BytesIO(); fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2); png_buffer.seek(0)
+            ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
+            for label in ax.get_xticklabels(): label.set_fontweight('bold'); label.set_rotation(0)
+            for label in ax.get_yticklabels(): label.set_fontweight('bold'); label.set_rotation(90)
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+            ax.set_xlabel(""); ax.set_ylabel("")
+            add_north_arrow(ax)
             
-            # Guardado final de resultados
+            scale_length_m = 5000; scale_segments = 5
+            scale_x = total_minx + (total_width * 0.02); scale_y = total_miny + (total_height * 0.02)
+            segment_length = scale_length_m / scale_segments; bar_height = total_height * 0.007
+            for i in range(scale_segments):
+                color = 'black' if i % 2 == 0 else 'white'
+                rect = plt.Rectangle((scale_x + i * segment_length, scale_y), segment_length, bar_height, facecolor=color, edgecolor='black', linewidth=1, zorder=10)
+                ax.add_patch(rect)
+            
+            text_offset = total_height * 0.008; text_y_pos = scale_y - text_offset
+            ax.text(scale_x, text_y_pos, '0', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+            ax.text(scale_x + scale_length_m / 2, text_y_pos, '2.5', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+            ax.text(scale_x + scale_length_m, text_y_pos, '5 km', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+            
+            legend_elements = [
+                Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
+                Patch(facecolor='none', edgecolor='black', linewidth=1, label='LÍMITE URBANO'),
+                Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'), # Color rojo original
+                Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'),
+                Line2D([0], [0], color='#10008C', lw=1, label='CORRIENTES DE AGUA'),
+                Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA', markerfacecolor='#55FF00', markeredgecolor='black', markersize=8, linestyle='None'),
+                Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL', markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None')
+            ]
+            legend_ax = ax.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10, title='SIMBOLOGÍA', title_fontsize=12, frameon=True, edgecolor='black', facecolor='white')
+            legend_ax.get_title().set_fontweight('bold')
+
+            if interpolation_results and np.any(interpolation_results["raster_image"]):
+                cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])
+                norm = Normalize(vmin=precip_min, vmax=precip_max)
+                cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm, orientation='vertical')
+                cb.ax.set_title('Precipitación\nAcumulada (mm)', size=10, weight='bold', pad=15)
+                cb.ax.tick_params(labelsize=9)
+                for spine in cbar_ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
+            
+            if geodata["logo"] is not None:
+                aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1]
+                logo_width = total_width * 0.15; logo_height = logo_width * aspect_ratio
+                logo_x = total_maxx - (total_width * 0.02) - logo_width
+                logo_y = total_miny + (total_height * 0.02)
+                ax.imshow(geodata["logo"], extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height], aspect='auto', zorder=10)
+            
+            ax.grid(True, linestyle=':', alpha=0.6, color='black')
+            
+            png_buffer = io.BytesIO()
+            fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
+            png_buffer.seek(0)
+            # --- FIN DE TU CÓDIGO DE PLOTEO ORIGINAL ---
+
+            # --- FINALIZACIÓN: GUARDAR TODO Y CAMBIAR DE VISTA ---
             st.session_state.figure, st.session_state.raster_io, st.session_state.png_buffer, st.session_state.report_date_str = fig, raster_io, png_buffer, report_date_pd.strftime('%Y%m%d')
-            desc_stats = st.session_state.stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
+            desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
             report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(st.session_state.stations_filtered_gdf)}\n- **Método Interpolación:** {st.session_state.interpolation_results['best_method'] if st.session_state.interpolation_results else 'N/A'}"
-            st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": st.session_state.total_df_con_na, "outliers_df": st.session_state.outliers_df, "desc_stats": desc_stats, "metrics_df": st.session_state.metrics_df}
+            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
+            st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": total_df_con_na, "outliers_df": outliers_df, "desc_stats": desc_stats, "metrics_df": metrics_df}
             
             st.session_state.map_generated = True
             st.session_state.processing_state = 'idle'
             st.session_state.progress_percent = 100
             st.rerun()
-    # ... (código de 'with col_info:' no cambia)
 
     with col_mapa:
         # --- NUEVO PLACEHOLDER CON SPINNER PERSONALIZADO ---
@@ -729,6 +819,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
