@@ -554,7 +554,7 @@ else:
                 st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
                 st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
 
-        if st.button("🚀 Generar Reporte Pluvial", type="primary", use_container_width=True):
+        if st.button("Generar Reporte Pluvial", type="primary", use_container_width=True):
             if report_date is None:
                 st.error("No se pudo determinar una fecha para el reporte.")
             else:
@@ -710,8 +710,8 @@ else:
                     st.rerun()
 
     with col_mapa:
-        st.markdown("### 🗺️ El mapa se mostrará aquí una vez que generes el reporte.")
+        st.markdown("### El mapa se mostrará aquí una vez que generes el reporte.")
         st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
         # Opcional: Mostrar una imagen de fondo o el logo
-        if geodata.get("logo") is not None:
-             st.image(geodata["logo"])
+        
+
