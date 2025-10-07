@@ -104,6 +104,7 @@ if 'map_generated' not in st.session_state:
     st.session_state.stats_panel_md = None
     st.session_state.processing_state = 'idle' # 'idle' o 'processing'
     st.session_state.progress_percent = 0
+    st.session_state.log_messages = [] # Añadimos el log al estado
 
 # Ahora el resto de la interfaz puede comenzar
 st.title("💧 Generador de Reportes Pluviales para León, Gto.")
@@ -404,7 +405,7 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
                 log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no válido en la respuesta.")
                 results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         
-        except (requests.exceptions.RequestException, ValueError) as e:
+        except (requests.exceptions.RequestException, ValueError, requests.exceptions.JSONDecodeError) as e:
             log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de API: {e}")
             results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         finally:
@@ -565,193 +566,151 @@ if st.session_state.map_generated:
 else:
     # --- VISTA DE CONFIGURACIÓN Y PROCESAMIENTO ---
     with col_info:
-        # La columna de información no cambia mucho
         display_sidebar_info()
         st.header("1. Selecciona el tipo de reporte")
-        report_option = st.radio("Elige las estaciones a incluir:", ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'), index=1, key="report_option")
+        report_option = st.radio("Elige las estaciones a incluir:", ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'), index=1, key="report_option", disabled=(st.session_state.processing_state == 'processing'))
         st.info("Añadir las estaciones de CONAGUA mejora la precisión del mapa.")
         st.header("2. Confirma la fecha del reporte")
-        report_date = None
-
-        if report_option == 'Solo Estaciones SAPAL':
-            report_date = datetime.now()
-            st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
-        else:
-            with st.spinner("Buscando la última fecha de CONAGUA..."): latest_conagua_date = get_latest_conagua_date(locations_conagua)
-            if latest_conagua_date:
-                report_date = latest_conagua_date
-                st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
-            else:
+        
+        # Lógica para mostrar la fecha y el botón
+        if st.session_state.processing_state == 'idle':
+            report_date = None
+            if report_option == 'Solo Estaciones SAPAL':
                 report_date = datetime.now()
-                st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
-                st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
-
-        # El botón ahora solo cambia el estado para iniciar el procesamiento
-        if st.button("🚀 Generar Reporte Pluvial", type="primary", use_container_width=True):
-            if report_date:
-                st.session_state.processing_state = 'processing'
-                st.session_state.progress_percent = 0
-                st.session_state.report_date_to_process = report_date
-                st.session_state.report_option_to_process = report_option
-                st.rerun()
+                st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
             else:
-                st.error("No se pudo determinar una fecha para el reporte.")
+                with st.spinner("Buscando la última fecha de CONAGUA..."): latest_conagua_date = get_latest_conagua_date(locations_conagua)
+                if latest_conagua_date:
+                    report_date = latest_conagua_date
+                    st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
+                else:
+                    report_date = datetime.now()
+                    st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
+                    st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
+
+            if st.button(" Generar Reporte Pluvial", type="primary", use_container_width=True):
+                if report_date:
+                    st.session_state.processing_state = 'processing'
+                    st.session_state.progress_percent = 0
+                    st.session_state.report_date_to_process = report_date
+                    st.session_state.report_option_to_process = report_option
+                    st.session_state.log_messages = ["Iniciando proceso..."] # Inicializa el log aquí
+                    st.rerun()
+                else:
+                    st.error("No se pudo determinar una fecha para el reporte.")
+        else: # Si está procesando, muestra el log
+            log_expander = st.expander("Ver progreso detallado...", expanded=True)
+            log_expander.markdown("\n\n".join(st.session_state.log_messages))
 
     with col_mapa:
-        # El contenido de esta columna depende del estado de procesamiento
         if st.session_state.processing_state == 'processing':
-            # Muestra la barra de progreso
             progress = st.session_state.progress_percent
-            st.markdown(f"""
-            <div class="center-container">
-                <div class="progress-circle-container">
-                    <div class="progress-circle" style="--progress: {progress}%;">
-                        <div class="progress-circle-inner">
-                            <span class="progress-text">{progress}%</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f'<div class="center-container"><div class="progress-circle-container"><div class="progress-circle" style="--progress: {progress}%;"><div class="progress-circle-inner"><span class="progress-text">{progress}%</span></div></div></div></div>', unsafe_allow_html=True)
             st.info("Procesando datos... Por favor, espera.")
         else:
-            # Muestra un texto de bienvenida
-             st.markdown("""
-            <div class="center-container">
-                <h3 style="text-align: center;">Listo para generar el reporte</h3>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown('<div class="center-container"><h3 style="text-align: center;">Listo para generar el reporte</h3></div>', unsafe_allow_html=True)
 
-    # --- LÓGICA DE PROCESAMIENTO ---
-    # Este bloque solo se ejecuta cuando el estado es 'processing'
+    # --- LÓGICA DE PROCESAMIENTO POR ETAPAS (CORREGIDA) ---
     if st.session_state.processing_state == 'processing':
-        # Recuperamos los parámetros guardados
-        report_date = st.session_state.report_date_to_process
-        report_option = st.session_state.report_option_to_process
+        log_container_placeholder = col_info.empty() # Usaremos un placeholder para el log
 
-        # Simulamos un log en la columna de información
-        with col_info:
-            log_expander = st.expander("Ver progreso detallado...", expanded=True)
-            log_container = log_expander.empty()
-            log_messages = ["Iniciando proceso..."]
-            log_container.markdown("\n\n".join(log_messages))
-        
-        # --- ETAPA 1: EXTRACCIÓN SAPAL ---
-        report_date_pd = pd.to_datetime(report_date.date())
-        sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, log_messages, log_container)
-        st.session_state.progress_percent = 25
-        st.rerun() # Detenemos aquí para que la UI se actualice
+        # ETAPA 1: Progreso 0% -> 25% (Extracción SAPAL)
+        if st.session_state.progress_percent == 0:
+            report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+            sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, st.session_state.log_messages, log_container_placeholder)
+            st.session_state.sapal_df_processed = sapal_df # Guardar resultado intermedio
+            st.session_state.progress_percent = 25
+            st.rerun()
 
-    # ... (El script se detiene aquí y se re-ejecuta por el rerun)
-    # En la siguiente ejecución, el progreso será 25 y continuará desde aquí...
+        # ETAPA 2: Progreso 25% -> 60% (Extracción CONAGUA)
+        elif st.session_state.progress_percent == 25:
+            report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+            start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
+            sapal_df = st.session_state.sapal_df_processed # Recuperar resultado anterior
+            
+            if "CONAGUA" in st.session_state.report_option_to_process:
+                conagua_df = fetch_conagua_data(locations_conagua, start_of_year, report_date_pd, st.session_state.log_messages, log_container_placeholder)
+                total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
+            else:
+                total_df = sapal_df
 
-    if st.session_state.progress_percent == 25:
-        with col_info: # Re-obtenemos el log container
-            log_expander = st.expander("Ver progreso detallado...", expanded=True)
-            log_container = log_expander.empty()
-        # --- ETAPA 2: EXTRACCIÓN CONAGUA (si es necesario) ---
-        report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
-        start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
-        
-        # Reconstruimos el DataFrame de SAPAL desde la etapa anterior (esto es importante)
-        sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, [], st.empty()) # Ejecutamos rápido sin logs
-        
-        if "CONAGUA" in st.session_state.report_option_to_process:
-            conagua_df = fetch_conagua_data(locations_conagua, start_of_year, report_date_pd, [], log_container)
-            total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
-        else:
-            total_df = sapal_df
+            st.session_state.total_df_processed = total_df
+            st.session_state.progress_percent = 60
+            st.rerun()
 
-        st.session_state.total_df_processed = total_df # Guardamos el resultado intermedio
-        st.session_state.progress_percent = 60
-        st.rerun()
+        # ETAPA 3: Progreso 60% -> 90% (Interpolación)
+        elif st.session_state.progress_percent == 60:
+            total_df = st.session_state.total_df_processed
+            total_df_con_na = total_df.copy(); st.session_state.total_df_con_na = total_df_con_na
+            if total_df.dropna(subset=['P_mm']).empty: st.error("No se encontraron datos válidos."); st.stop()
+            
+            updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
+            if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
+            stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
+            if not stations_filtered_gdf.empty: stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
+            else: outliers_df = pd.DataFrame()
 
-    # --- ETAPA 3: INTERPOLACIÓN Y GENERACIÓN DEL MAPA ---
-    if st.session_state.progress_percent == 60:
-        total_df = st.session_state.total_df_processed
-        
-        # ... (Aquí va todo el código de procesamiento que tenías)
-        # (Desde 'total_df_con_na = total_df.copy()' hasta el final)
-        total_df_con_na = total_df.copy()
-        if total_df.dropna(subset=['P_mm']).empty: st.error("Error Crítico..."); st.stop()
-        updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
-        if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
-        stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
-        if not stations_filtered_gdf.empty: stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
-        else: outliers_df = pd.DataFrame()
-        if len(stations_filtered_gdf) < 5: interpolation_results, metrics_df = None, None
-        else: interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
-        
-        # Actualizamos el progreso antes de la parte más lenta (renderizado)
-        st.session_state.progress_percent = 90
-        st.rerun()
+            st.session_state.stations_filtered_gdf = stations_filtered_gdf
+            st.session_state.outliers_df = outliers_df
+            
+            if len(stations_filtered_gdf) < 5: interpolation_results, metrics_df = None, None
+            else: interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
+            
+            st.session_state.interpolation_results = interpolation_results
+            st.session_state.metrics_df = metrics_df
+            st.session_state.progress_percent = 90
+            st.rerun()
 
-    # --- ETAPA 4: RENDERIZADO FINAL DEL GRÁFICO ---
-    if st.session_state.progress_percent == 90:
-        # Reconstruimos las variables necesarias de la etapa anterior
-        total_df = st.session_state.total_df_processed
-        total_df_con_na = total_df.copy()
-        updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
-        if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
-        stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
-        if not stations_filtered_gdf.empty: stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
-        else: outliers_df = pd.DataFrame()
-        if len(stations_filtered_gdf) < 5: interpolation_results, metrics_df = None, None
-        else: interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
-
-        # --- AQUÍ VA TODO EL CÓDIGO DE MATPLOTLIB PARA DIBUJAR EL MAPA ---
-        fig, ax = plt.subplots(figsize=(12, 9), facecolor='white')
-        # ... (pega aquí todo tu código de ploteo, desde fig, ax... hasta fig.savefig(...))
-        ax.set_facecolor('white'); fig.patch.set_facecolor('white'); fig.subplots_adjust(right=0.7)
-        limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs); cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
-        lim_bounds = limite_gdf.total_bounds; cue_bounds = cuenca_gdf.total_bounds
-        total_minx, total_miny, total_maxx, total_maxy = min(lim_bounds[0], cue_bounds[0]), min(lim_bounds[1], cue_bounds[1]), max(lim_bounds[2], cue_bounds[2]), max(lim_bounds[3], cue_bounds[3])
-        total_width, total_height = total_maxx - total_minx, total_maxy - total_miny
-        x_margin, y_margin = total_width * 0.05, total_height * 0.05
-        ax.set_xlim(total_minx - x_margin, total_maxx + x_margin); ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
-        boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
-        clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
-        hillshade_data = clipped_hillshade[0].astype(float); hillshade_data[hillshade_data == 255] = np.nan
-        ax.imshow(hillshade_data, extent=[clipped_transform[2], clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1], clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0], clipped_transform[5]], cmap='gray', alpha=0.7, aspect='equal', zorder=1)
-        if interpolation_results and np.any(interpolation_results["raster_image"]):
-            raster_image = np.ma.masked_invalid(interpolation_results["raster_image"]); raster_meta = interpolation_results["raster_meta"]
-            custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
-            precip_min, precip_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
-            show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
-            raster_io = interpolation_results['raster_io']
-        else: raster_io = None
-        streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs); streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
-        for spine in ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
-        geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
-        geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
-        geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF8C00', linewidth=1.5, clip_on=False, zorder=4)
-        geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
-        if not stations_filtered_gdf.empty:
-            stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
-            stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
-        report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
-        ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
-        ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
-        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
-        ax.set_xlabel(""); ax.set_ylabel("")
-        add_north_arrow(ax)
-        png_buffer = io.BytesIO()
-        fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
-        png_buffer.seek(0)
-        # --------------------------------------------------------------------
-
-        # --- FINALIZACIÓN: GUARDAR TODO Y CAMBIAR DE VISTA ---
-        st.session_state.figure, st.session_state.raster_io, st.session_state.png_buffer, st.session_state.report_date_str = fig, raster_io, png_buffer, report_date_pd.strftime('%Y%m%d')
-        desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
-        report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-        stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
-        st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": total_df_con_na.rename(columns={'P_mm': 'Precip. (mm)'}), "outliers_df": outliers_df.rename(columns={'P_mm': 'Precip. (mm)'}), "desc_stats": desc_stats, "metrics_df": metrics_df}
-        
-        st.session_state.map_generated = True
-        st.session_state.processing_state = 'idle'
-        st.session_state.progress_percent = 100
-        st.rerun()
-
+        # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa)
+        elif st.session_state.progress_percent == 90:
+            stations_filtered_gdf = st.session_state.stations_filtered_gdf
+            interpolation_results = st.session_state.interpolation_results
+            
+            fig, ax = plt.subplots(figsize=(12, 9), facecolor='white')
+            # ... (Aquí va todo el CÓDIGO DE PLOTEO que ya tenías, no lo copio aquí por brevedad, pero debe estar)
+            ax.set_facecolor('white'); fig.patch.set_facecolor('white'); fig.subplots_adjust(right=0.7)
+            limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs); cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
+            lim_bounds = limite_gdf.total_bounds; cue_bounds = cuenca_gdf.total_bounds
+            total_minx, total_miny, total_maxx, total_maxy = min(lim_bounds[0], cue_bounds[0]), min(lim_bounds[1], cue_bounds[1]), max(lim_bounds[2], cue_bounds[2]), max(lim_bounds[3], cue_bounds[3])
+            total_width, total_height = total_maxx - total_minx, total_maxy - total_miny
+            x_margin, y_margin = total_width * 0.05, total_height * 0.05
+            ax.set_xlim(total_minx - x_margin, total_maxx + x_margin); ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
+            boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
+            clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
+            hillshade_data = clipped_hillshade[0].astype(float); hillshade_data[hillshade_data == 255] = np.nan
+            ax.imshow(hillshade_data, extent=[clipped_transform[2], clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1], clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0], clipped_transform[5]], cmap='gray', alpha=0.7, aspect='equal', zorder=1)
+            if interpolation_results and np.any(interpolation_results["raster_image"]):
+                raster_image = np.ma.masked_invalid(interpolation_results["raster_image"]); raster_meta = interpolation_results["raster_meta"]
+                custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
+                precip_min, precip_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
+                show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
+                raster_io = interpolation_results['raster_io']
+            else: raster_io = None
+            streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs); streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
+            for spine in ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
+            geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
+            geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
+            geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF8C00', linewidth=1.5, clip_on=False, zorder=4)
+            geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
+            if not stations_filtered_gdf.empty:
+                stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
+                stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
+            report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
+            # ... hasta fig.savefig ...
+            png_buffer = io.BytesIO(); fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2); png_buffer.seek(0)
+            
+            # Guardado final de resultados
+            st.session_state.figure, st.session_state.raster_io, st.session_state.png_buffer, st.session_state.report_date_str = fig, raster_io, png_buffer, report_date_pd.strftime('%Y%m%d')
+            desc_stats = st.session_state.stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
+            report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
+            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(st.session_state.stations_filtered_gdf)}\n- **Método Interpolación:** {st.session_state.interpolation_results['best_method'] if st.session_state.interpolation_results else 'N/A'}"
+            st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": st.session_state.total_df_con_na, "outliers_df": st.session_state.outliers_df, "desc_stats": desc_stats, "metrics_df": st.session_state.metrics_df}
+            
+            st.session_state.map_generated = True
+            st.session_state.processing_state = 'idle'
+            st.session_state.progress_percent = 100
+            st.rerun()
     # ... (código de 'with col_info:' no cambia)
 
     with col_mapa:
@@ -762,6 +721,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
