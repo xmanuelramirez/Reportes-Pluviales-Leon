@@ -54,47 +54,71 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 # 1. ESTABLECER LA CONFIGURACIÓN DE LA PÁGINA (DEBE SER EL PRIMER COMANDO DE STREAMLIT)
 st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (ACTUALIZADO) ---
+# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON ANIMACIONES AVANZADAS) ---
 st.markdown("""
 <style>
-/* --- ESTILO PARA BOTONES PRINCIPALES --- */
+/* --- ESTILOS PARA BOTONES Y RADIO (sin cambios) --- */
 div[data-testid="stButton"] > button {
     background-color: #0D6AB7; color: white; border: 1px solid #0D6AB7;
 }
 div[data-testid="stButton"] > button:hover {
     background-color: #0A5591; color: white; border: 1px solid #0A5591;
 }
-
-/* --- ESTILO PARA BOTONES DE OPCIÓN (RADIO) --- */
 div[data-testid="stRadio"] input:checked + div > span {
     background-color: #0D6AB7 !important; border-color: #0D6AB7 !important;
 }
 
-/* --- NUEVO: ESTILOS PARA ANIMACIÓN DE TEXTO --- */
-/* Contenedor para centrar vertical y horizontalmente */
+/* --- NUEVOS ESTILOS PARA EL PLACEHOLDER ANIMADO --- */
+
+/* Contenedor principal para centrar todo */
 .center-container {
     display: flex;
+    flex-direction: column; /* Apila el globo y el texto verticalmente */
     justify-content: center;
     align-items: center;
-    height: 400px; /* Altura fija para el centrado vertical */
+    height: 400px; /* Altura para el centrado vertical */
 }
-/* Estilo del texto que va a girar */
-.spinning-text {
-    font-size: 1.5em; /* Tamaño de letra */
+
+/* Estilo y animación para el globo terráqueo */
+.spinning-globe {
+    width: 150px;
+    height: 150px;
+    border-radius: 50%;
+    /* Usamos una textura de mapa del mundo como fondo */
+    background: url('https://www.patorjk.com/misc/gifs/maps/map-2000-0-0-2-1-3-0.png');
+    background-size: 200% auto; /* El 200% es clave para la animación de bucle */
+    animation: spin-globe 10s linear infinite;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 15px rgba(255,255,255,0.1);
+    margin-bottom: 20px; /* Espacio entre el globo y el texto */
+}
+
+@keyframes spin-globe {
+    from { background-position: 0% 0%; }
+    to { background-position: 200% 0%; }
+}
+
+/* Contenedor para crear el efecto de perspectiva 3D */
+.text-perspective-container {
+    perspective: 500px;
+}
+
+/* Estilo y animación para el texto rotando en 3D */
+.rotating-text-3d {
+    font-size: 1.5em;
     font-weight: bold;
     color: #FAFAFA;
-    animation: spin 4s linear infinite; /* Aplica la animación 'spin' */
+    text-transform: uppercase;
+    animation: rotate-text-y 6s linear infinite;
+    transform-style: preserve-3d;
 }
-/* Definición de la animación de giro */
-@keyframes spin {
-    from {
-        transform: rotate(0deg);
-    }
-    to {
-        transform: rotate(360deg);
-    }
+
+@keyframes rotate-text-y {
+    from { transform: rotateY(0deg); }
+    to { transform: rotateY(360deg); }
 }
 </style>
 """, unsafe_allow_html=True)
+# --- FIN DEL BLOQUE DE ESTILOS ---
 # --- FIN DEL BLOQUE DE ESTILOS ---
 
 # --- INICIALIZACIÓN DE ESTADO DE SESIÓN Y OTRAS CONFIGURACIONES ---
@@ -761,15 +785,19 @@ else:
     # ... (código de 'with col_info:' no cambia)
 
     with col_mapa:
-        # --- 3. PLACEHOLDER ANIMADO ---
+        # --- NUEVO PLACEHOLDER CON GLOBO Y TEXTO 3D ---
         st.markdown("""
         <div class="center-container">
-            <div class="spinning-text">
-                El mapa se mostrará aquí...
+            <div class="spinning-globe"></div>
+            <div class="text-perspective-container">
+                <div class="rotating-text-3d">
+                    El mapa se mostrará aquí
+                </div>
             </div>
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
