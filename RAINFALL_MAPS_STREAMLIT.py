@@ -51,7 +51,40 @@ from rasterio.plot import show
 warnings.simplefilter('ignore', InsecureRequestWarning)
 # --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
+st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
 
+# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS ---
+st.markdown("""
+<style>
+/* Apunta al botón principal de Streamlit (el que tiene el fondo de color) */
+div[data-testid="stButton"] > button {
+    background-color: #0D6AB7;
+    color: white;
+    border: 1px solid #0D6AB7;
+}
+/* Estilo para cuando el cursor está sobre el botón */
+div[data-testid="stButton"] > button:hover {
+    background-color: #0A5591; /* Un azul un poco más oscuro para el efecto hover */
+    color: white;
+    border: 1px solid #0A5591;
+}
+/* Apunta a los botones secundarios (como los de descarga) */
+div[data-testid="stDownloadButton"] > button {
+    background-color: #FFFFFF;
+    color: #0D6AB7;
+    border: 1px solid #0D6AB7;
+}
+div[data-testid="stDownloadButton"] > button:hover {
+    background-color: #F0F2F6;
+    color: #0A5591;
+    border: 1px solid #0A5591;
+}
+</style>
+""", unsafe_allow_html=True)
+# --- FIN DEL BLOQUE DE ESTILOS ---
+
+os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
+# ... el resto de tu código sigue igual
 os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
 try:
     locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
@@ -714,4 +747,5 @@ else:
         st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
         # Opcional: Mostrar una imagen de fondo o el logo
         
+
 
