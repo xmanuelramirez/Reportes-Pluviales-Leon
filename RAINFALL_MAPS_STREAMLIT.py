@@ -58,6 +58,7 @@ st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
 # --- INICIALIZACIÓN DE ESTADO DE SESIÓN Y OTRAS CONFIGURACIONES ---
 os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON EFECTO ORBITAL) ---
+# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON SPINNER) ---
 st.markdown("""
 <style>
 /* --- ESTILOS PARA BOTONES Y RADIO (sin cambios) --- */
@@ -71,9 +72,9 @@ div[data-testid="stRadio"] input:checked + div > span {
     background-color: #0D6AB7 !important; border-color: #0D6AB7 !important;
 }
 
-/* --- NUEVOS ESTILOS PARA EL PLACEHOLDER ORBITAL --- */
+/* --- NUEVO ESTILO PARA EL SPINNER DE CARGA --- */
 
-/* Contenedor principal para centrar todo */
+/* Contenedor para centrar el spinner */
 .center-container {
     display: flex;
     justify-content: center;
@@ -81,64 +82,26 @@ div[data-testid="stRadio"] input:checked + div > span {
     height: 400px;
 }
 
-/* Contenedor del sistema orbital, para posicionar el texto relativo al globo */
-.orbit-container {
-    position: relative;
-    width: 200px;
-    height: 200px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-
-/* Estilo del globo terráqueo (sin cambios en la animación del fondo) */
-.spinning-globe {
-    position: absolute;
-    width: 150px;
-    height: 150px;
+/* Estilo y animación del spinner */
+.custom-spinner {
+    width: 80px;
+    height: 80px;
     border-radius: 50%;
-    background: url('https://www.patorjk.com/misc/gifs/maps/map-2000-0-0-2-1-3-0.png');
-    background-size: 200% auto;
-    animation: spin-globe 10s linear infinite;
-    box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 15px rgba(255,255,255,0.1);
+    /* El truco: un borde gris y solo la parte de arriba azul */
+    border: 8px solid #444; /* Color de la pista/fondo del círculo */
+    border-top-color: #0D6AB7; /* Color azul SAPAL para el segmento que gira */
+    animation: spin 1s linear infinite;
 }
 
-@keyframes spin-globe {
-    from { background-position: 0% 0%; }
-    to { background-position: 200% 0%; }
-}
-
-/* Estilo del texto que orbitará */
-.orbiting-text {
-    position: absolute;
-    color: #FAFAFA;
-    font-size: 1.2em;
-    font-weight: bold;
-    white-space: nowrap; /* Evita que el texto se parta en dos líneas */
-    animation: orbit 8s linear infinite;
-    transform-style: preserve-3d;
-}
-
-/* La animación clave que crea el efecto de órbita elíptica */
-@keyframes orbit {
-    0% {
-        transform: rotateZ(-15deg) rotateY(-60deg) translateX(100px) scaleY(0.7);
-        opacity: 1;
-        z-index: 10; /* El texto está por delante */
-    }
-    50% {
-        transform: rotateZ(-15deg) rotateY(60deg) translateX(100px) scaleY(0.7);
-        opacity: 0.3; /* El texto se desvanece al ir "detrás" */
-        z-index: -10; /* El texto está por detrás */
-    }
-    100% {
-        transform: rotateZ(-15deg) rotateY(-60deg) translateX(100px) scaleY(0.7);
-        opacity: 1;
-        z-index: 10;
+/* Animación de giro simple */
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 </style>
 """, unsafe_allow_html=True)
+# --- FIN DEL BLOQUE DE ESTILOS ---
 # --- FIN DEL BLOQUE DE ESTILOS ---
 # Intenta configurar el idioma y muestra la advertencia si falla (esto ya es seguro)
 try:
@@ -801,16 +764,14 @@ else:
     # ... (código de 'with col_info:' no cambia)
 
     with col_mapa:
-        # --- NUEVO PLACEHOLDER CON TEXTO ORBITAL ---
+        # --- NUEVO PLACEHOLDER CON SPINNER PERSONALIZADO ---
         st.markdown("""
         <div class="center-container">
-            <div class="orbit-container">
-                <div class="spinning-globe"></div>
-                <div class="orbiting-text">El mapa se mostrará aquí...</div>
-            </div>
+            <div class="custom-spinner"></div>
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
