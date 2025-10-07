@@ -519,7 +519,7 @@ if st.session_state.map_generated:
         reset_analysis()
         st.rerun()
 else:
-    # --- VISTA DE CONFIGURACIÓN (CORREGIDA) ---
+    # --- VISTA DE CONFIGURACIÓN (CORREGIDA Y ORDENADA) ---
     st.header("1. Selecciona el tipo de reporte")
     report_option = st.radio(
         "Elige las estaciones a incluir:",
@@ -562,12 +562,11 @@ else:
             log_container = log_expander.empty()
             log_messages = ["Iniciando proceso..."]
             log_container.markdown("\n\n".join(log_messages))
-
+    
             report_date_pd = pd.to_datetime(report_date.date())
             start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
-
+    
             with st.spinner('Extrayendo y procesando datos... Esto puede tardar varios minutos.'):
-                # El resto del código de procesamiento sigue aquí sin cambios...
                 total_df = pd.DataFrame()
                 sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, log_messages, log_container)
                 if "CONAGUA" in report_option:
@@ -575,318 +574,199 @@ else:
                     total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
                 else:
                     total_df = sapal_df
-                # ... hasta el final del script
-                st.error("No se pudo determinar una fecha para el reporte.")
-                st.stop()
-            else:
-                log_expander = st.expander("Ver progreso de la extracción en tiempo real...", expanded=True)
-                log_container = log_expander.empty()
-                log_messages = ["Iniciando proceso..."]
+    
+                total_df_con_na = total_df.copy()
+    
+                if total_df.dropna(subset=['P_mm']).empty:
+                    st.error("Error Crítico: No se encontraron datos de precipitación válidos para generar el reporte.")
+                    st.stop()
+    
+                log_messages.append("--- Extracción finalizada. Procesando datos... ---")
                 log_container.markdown("\n\n".join(log_messages))
-        
-                report_date_pd = pd.to_datetime(report_date.date())
-                start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
-        
-                with st.spinner('Extrayendo y procesando datos... Esto puede tardar varios minutos.'):
-                    total_df = pd.DataFrame()
-                    sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, log_messages, log_container)
-                    if "CONAGUA" in report_option:
-                        conagua_df = fetch_conagua_data(locations_conagua, start_of_year, report_date_pd, log_messages, log_container)
-                        total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
-                    else:
-                        total_df = sapal_df
-        
-                    total_df_con_na = total_df.copy()
-        
-                    if total_df.dropna(subset=['P_mm']).empty:
-                        st.error("Error Crítico: No se encontraron datos de precipitación válidos para generar el reporte.")
-                        st.stop()
-        
-                    log_messages.append("--- Extracción finalizada. Procesando datos... ---")
+    
+                updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
+                if 'P_mm_y' in updated_stations_gdf.columns:
+                    updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
+                if 'P_mm_x' in updated_stations_gdf.columns:
+                    updated_stations_gdf = updated_stations_gdf.drop(columns=['P_mm_x'])
+                
+                stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
+                if not stations_filtered_gdf.empty:
+                    stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
+                else:
+                    outliers_df = pd.DataFrame()
+                
+                if len(stations_filtered_gdf) < 5:
+                    st.warning(f"Se encontraron {len(stations_filtered_gdf)} estaciones válidas. Se necesitan al menos 5 para la interpolación. Se generará un mapa base sin interpolación.")
+                    interpolation_results = None
+                    metrics_df = None
+                else:
+                    log_messages.append("--- Generando mapa de interpolación... ---")
                     log_container.markdown("\n\n".join(log_messages))
-        
-                    updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
-                    if 'P_mm_y' in updated_stations_gdf.columns:
-                        updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
-                    if 'P_mm_x' in updated_stations_gdf.columns:
-                        updated_stations_gdf = updated_stations_gdf.drop(columns=['P_mm_x'])
-                    
-                    # Asegura que hay datos válidos antes de continuar
-                    stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
-                    if not stations_filtered_gdf.empty:
-                        stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
-                    else:
-                        outliers_df = pd.DataFrame() # DataFrame vacío si no hay datos para filtrar
-                    
-                    # Validación de datos para interpolación
-                    if len(stations_filtered_gdf) < 5:
-                        st.warning(f"Se encontraron {len(stations_filtered_gdf)} estaciones válidas. Se necesitan al menos 5 para la interpolación. Se generará un mapa base sin interpolación.")
-                        interpolation_results = None
-                        metrics_df = None
-                    else:
-                        log_messages.append("--- Generando mapa de interpolación... ---")
-                        log_container.markdown("\n\n".join(log_messages))
-                        interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
-                    
-                    
+                    interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
+                
+                # --- INICIA BLOQUE DE VISUALIZACIÓN ---
+                fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
+                ax.set_facecolor('white')
+                fig.patch.set_facecolor('white')
+                fig.subplots_adjust(right=0.7)
+                
+                limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
+                cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
+                
+                lim_bounds = limite_gdf.total_bounds
+                cue_bounds = cuenca_gdf.total_bounds
+                
+                total_minx = min(lim_bounds[0], cue_bounds[0])
+                total_miny = min(lim_bounds[1], cue_bounds[1])
+                total_maxx = max(lim_bounds[2], cue_bounds[2])
+                total_maxy = max(lim_bounds[3], cue_bounds[3])
+                
+                total_width = total_maxx - total_minx
+                total_height = total_maxy - total_miny
+                x_margin = total_width * 0.05
+                y_margin = total_height * 0.05
+                
+                ax.set_xlim(total_minx - x_margin, total_maxx + x_margin)
+                ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
+                
+                boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
+                clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
+                hillshade_data = clipped_hillshade[0].astype(float)
+                hillshade_data[hillshade_data == 255] = np.nan
+                
+                im = ax.imshow(hillshade_data,
+                               extent=[clipped_transform[2],
+                                       clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1],
+                                       clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0],
+                                       clipped_transform[5]],
+                               cmap='gray', alpha=0.7, aspect='equal', zorder=1)
+                
+                if interpolation_results and np.any(interpolation_results["raster_image"]):
+                    raster_image = np.ma.masked_invalid(interpolation_results["raster_image"])
+                    raster_meta = interpolation_results["raster_meta"]
+                    custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
+                    precip_min = stations_filtered_gdf['P_mm'].min()
+                    precip_max = stations_filtered_gdf['P_mm'].max()
+                    show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
+                    raster_io = interpolation_results['raster_io']
+                else:
+                    log_messages.append("⚠️ No se trazó la capa de precipitación por falta de datos o error de interpolación.")
+                    raster_io = None
+                
+                streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs)
+                if 'order_1' in streams_gdf.columns:
+                    order_col = 'order_1'
+                    unique_orders = sorted(streams_gdf[order_col].dropna().unique())
+                    for order in unique_orders:
+                        subset = streams_gdf[streams_gdf[order_col] == order]
+                        linewidth = 0.1 + (order * 0.1) if pd.notna(order) else 0.1
+                        subset.plot(ax=ax, color='#10008C', linewidth=linewidth, label=f'Orden {order}', zorder=3)
+                else:
+                    streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
+                
+                for spine in ax.spines.values():
+                    spine.set_edgecolor('black')
+                    spine.set_linewidth(1)
+                
+                geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
+                geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
+                geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, clip_on=False, zorder=4)
+                geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
+                
+                if not stations_filtered_gdf.empty:
+                    sapal_stations = stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL']
+                    conagua_stations = stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA']
+                    sapal_stations.to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
+                    conagua_stations.to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
 
-                    # --- INICIA BLOQUE DE VISUALIZACIÓN MODIFICADO ---
+                ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
+                ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
+                for label in ax.get_xticklabels(): label.set_fontweight('bold'); label.set_rotation(0)
+                for label in ax.get_yticklabels(): label.set_fontweight('bold'); label.set_rotation(90)
+                ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+                ax.set_xlabel(""); ax.set_ylabel("")
+                add_north_arrow(ax)
+                
+                scale_length_m = 5000
+                scale_segments = 5
+                margin_x = total_width * 0.02
+                margin_y = total_height * 0.02
+                scale_x = total_minx + margin_x
+                scale_y = total_miny + margin_y
+                segment_length = scale_length_m / scale_segments
+                bar_height = total_height * 0.007
+                
+                for i in range(scale_segments):
+                    color = 'black' if i % 2 == 0 else 'white'
+                    rect = plt.Rectangle((scale_x + i * segment_length, scale_y), segment_length, bar_height, facecolor=color, edgecolor='black', linewidth=1, zorder=10)
+                    ax.add_patch(rect)
+                
+                text_offset = total_height * 0.008
+                text_y_pos = scale_y - text_offset
+                ax.text(scale_x, text_y_pos, '0', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+                ax.text(scale_x + scale_length_m / 2, text_y_pos, '2.5', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+                ax.text(scale_x + scale_length_m, text_y_pos, '5 km', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+                
+                legend_elements = [
+                    Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
+                    Patch(facecolor='none', edgecolor='black', linewidth=1, label='LÍMITE URBANO'),
+                    Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'),
+                    Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'),
+                    Line2D([0], [0], color='#10008C', lw=1, label='CORRIENTES DE AGUA'),
+                    Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA', markerfacecolor='#55FF00', markeredgecolor='black', markersize=8, linestyle='None'),
+                    Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL', markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None')
+                ]
+                
+                legend_ax = ax.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10, title='SIMBOLOGÍA', title_fontsize=12, frameon=True, edgecolor='black', facecolor='white')
+                legend_ax.get_title().set_fontweight('bold')
 
-                    # Lógica de visualización unificada y robusta
-                    fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
-                    ax.set_facecolor('white')
-                    fig.patch.set_facecolor('white')
-                    fig.subplots_adjust(right=0.7)
-                    
-
-                    # Trazado de elementos base que siempre deben estar presentes
-                    limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
-                    cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
-                    
-                    # Obtener los límites de ambas capas para asegurar que todo quepa en el mapa
-                    lim_bounds = limite_gdf.total_bounds
-                    cue_bounds = cuenca_gdf.total_bounds
-                    
-                    # Combinar los límites para obtener la extensión total
-                    total_minx = min(lim_bounds[0], cue_bounds[0])
-                    total_miny = min(lim_bounds[1], cue_bounds[1])
-                    total_maxx = max(lim_bounds[2], cue_bounds[2])
-                    total_maxy = max(lim_bounds[3], cue_bounds[3])
-                    
-                    # Calcular el margen basándose en la extensión total combinada
-                    total_width = total_maxx - total_minx
-                    total_height = total_maxy - total_miny
-                    x_margin = total_width * 0.05  # 5% de margen a cada lado
-                    y_margin = total_height * 0.05 # 5% de margen arriba y abajo
-                    
-                    # Establecer los límites finales del mapa para que todo sea visible
-                    ax.set_xlim(total_minx - x_margin, total_maxx + x_margin)
-                    ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
-                    
-                    boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
-                    clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
-                    hillshade_data = clipped_hillshade[0].astype(float)
-                    hillshade_data[hillshade_data == 255] = np.nan
-                    
-                    # --- ASIGNACIÓN DE ZORDER CORREGIDA ---
-                    # ZORDER 1: Capa base de relieve (lo más bajo)
-                    im = ax.imshow(hillshade_data,
-                                   extent=[clipped_transform[2],
-                                           clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1],
-                                           clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0],
-                                           clipped_transform[5]],
-                                   cmap='gray', alpha=0.7, aspect='equal', zorder=1)
-                    
-                    # Lógica de trazado de la capa de precipitación con enmascaramiento
-                    if interpolation_results and np.any(interpolation_results["raster_image"]):
-                        raster_image = np.ma.masked_invalid(interpolation_results["raster_image"])
-                        raster_meta = interpolation_results["raster_meta"]
-                        custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
-                        precip_min = stations_filtered_gdf['P_mm'].min()
-                        precip_max = stations_filtered_gdf['P_mm'].max()
-                        # ### CAMBIO AQUÍ ###: ZORDER 2 para la precipitación (debajo de los ríos)
-                        show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
-                        raster_io = interpolation_results['raster_io']
-                    else:
-                        log_messages.append("⚠️ No se trazó la capa de precipitación por falta de datos o error de interpolación.")
-                        raster_io = None
-                    
-                    # ### CAMBIO AQUÍ ###: ZORDER 3 para las corrientes de agua (encima de la precipitación)
-                    streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs)
-                    if 'order_1' in streams_gdf.columns:
-                        order_col = 'order_1'
-                        unique_orders = sorted(streams_gdf[order_col].dropna().unique())
-                        for order in unique_orders:
-                            subset = streams_gdf[streams_gdf[order_col] == order]
-                            linewidth = 0.1 + (order * 0.1) if pd.notna(order) else 0.1
-                            subset.plot(ax=ax, color='#10008C', linewidth=linewidth, label=f'Orden {order}', zorder=3)
-                    else:
-                        streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
-                    
-                    # Asegurar fondo blanco y bordes de mapa
-                    ax.set_facecolor('white')
-                    fig.patch.set_facecolor('white')
-                    ax.patch.set_facecolor('white')
-                    for spine in ax.spines.values():
+                if interpolation_results and np.any(interpolation_results["raster_image"]):
+                    cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])
+                    norm = Normalize(vmin=precip_min, vmax=precip_max)
+                    cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm, orientation='vertical')
+                    cb.ax.set_title('Precipitación\nAcumulada (mm)', size=10, weight='bold', pad=15)
+                    cb.ax.tick_params(labelsize=9)
+                    for spine in cbar_ax.spines.values():
                         spine.set_edgecolor('black')
                         spine.set_linewidth(1)
-                    
-                    # ZORDER 4: Límites y polígonos importantes
-                    geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
-                    geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
-                    geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, clip_on=False, zorder=4)
-                    
-                    # ZORDER 5: Presa El Palote
-                    geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
-                    
-                    # ZORDER 6: Estaciones
-                    if not stations_filtered_gdf.empty:
-                        sapal_stations = stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL']
-                        conagua_stations = stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA']
-                        sapal_stations.to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
-                        conagua_stations.to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
-                        # COMENTAR O ELIMINAR LAS ETIQUETAS DE VALORES
-                        # for idx, row in stations_filtered_gdf.to_crs(geodata['hillshade'].crs).iterrows():
-                        #     ax.text(row.geometry.x, row.geometry.y, f' {row["P_mm"]:.1f}', fontsize=8, ha='left', va='center', weight='bold', color='black',
-                        #             path_effects=[patheffects.withStroke(linewidth=1.5, foreground='white')])
-                    # Configuración final del mapa
-                    ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
-                    ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
-                    for label in ax.get_xticklabels(): label.set_fontweight('bold'); label.set_rotation(0)
-                    for label in ax.get_yticklabels(): label.set_fontweight('bold'); label.set_rotation(90)
-                    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
-                    ax.set_xlabel(""); ax.set_ylabel("")
-                    add_north_arrow(ax)
-                    # 1. Parámetros de la barra de escala
-                    scale_length_m = 5000  # Longitud total de la barra en metros (5 km)
-                    scale_segments = 5     # Número de divisiones (blanco y negro)
-                    
-                    # 2. Calcular la posición de anclaje (esquina inferior izquierda)
-                    # Usaremos el mismo margen que para el logo para mantener la consistencia
-                    map_width = total_maxx - total_minx
-                    map_height = total_maxy - total_miny
-                    margin_x = map_width * 0.02
-                    margin_y = map_height * 0.02
-                    
-                    # Coordenada 'x' e 'y' de la esquina inferior izquierda de la barra
-                    scale_x = total_minx + margin_x
-                    scale_y = total_miny + margin_y
-                    
-                    # 3. Dibujar los segmentos de la barra (rectángulos)
-                    segment_length = scale_length_m / scale_segments
-                    bar_height = map_height * 0.007 # Altura de la barra, relativa al mapa
-                    
-                    for i in range(scale_segments):
-                        color = 'black' if i % 2 == 0 else 'white'
-                        rect = plt.Rectangle(
-                            (scale_x + i * segment_length, scale_y),  # Posición (x, y)
-                            segment_length,                           # Ancho
-                            bar_height,                               # Alto
-                            facecolor=color,
-                            edgecolor='black',
-                            linewidth=1,
-                            zorder=10  # zorder alto para que esté encima de todo
-                        )
-                        ax.add_patch(rect)
-                    
-                    # 4. Dibujar las etiquetas de texto UNA SOLA VEZ (fuera del bucle)
-                    text_offset = map_height * 0.008 # Distancia del texto a la barra
-                    text_y_pos = scale_y - text_offset
-                    
-                    ax.text(scale_x, text_y_pos, '0', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
-                    ax.text(scale_x + scale_length_m / 2, text_y_pos, '2.5', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
-                    ax.text(scale_x + scale_length_m, text_y_pos, '5 km', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
-                    legend_elements = [
-                        Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
-                        Patch(facecolor='none', edgecolor='black', linewidth=1, label='LÍMITE URBANO'),
-                        Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'),
-                        Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'),
-                        Line2D([0], [0], color='#10008C', lw=1, label='CORRIENTES DE AGUA'),
-                        Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA',
-                               markerfacecolor='#55FF00', markeredgecolor='black', markersize=8, linestyle='None'),
-                        Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL',
-                               markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None')
-                    ]
-                    
-                    legend_ax = ax.legend(handles=legend_elements,
-                                          bbox_to_anchor=(1.02, 1),
-                                          loc='upper left',
-                                          fontsize=10,
-                                          title='SIMBOLOGÍA',
-                                          title_fontsize=12,
-                                          frameon=True,
-                                          edgecolor='black',
-                                          facecolor='white')
-                    legend_ax.get_title().set_fontweight('bold')
-
-                    # BARRA DE COLOR VERTICAL DENTRO DEL CUADRO DE LEYENDA
-                    if interpolation_results and np.any(interpolation_results["raster_image"]):
-                        # Posicionar la barra debajo de la leyenda
-                        cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])  # [left, bottom, width, height] - VERTICAL
-                        norm = Normalize(vmin=precip_min, vmax=precip_max)
-                        cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm, orientation='vertical')
-                        cb.ax.set_title('Precipitación\nAcumulada (mm)', size=10, weight='bold', pad=15)
-                        cb.ax.tick_params(labelsize=9)
-                        
-                        # Marco alrededor de la barra
-                        for spine in cbar_ax.spines.values():
-                            spine.set_edgecolor('black')
-                            spine.set_linewidth(1)
-                        
-                    
-                    # CÓDIGO CORREGIDO PARA LA ESQUINA INFERIOR DERECHA
-                    if geodata["logo"] is not None:
-                        # 1. Definir el tamaño del logo relativo al ancho del mapa
-                        map_width = total_maxx - total_minx
-                        logo_width = map_width * 0.15  # El logo ocupará el 15% del ancho del mapa
-                    
-                        # 2. Calcular la altura del logo para mantener su proporción original
-                        aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1] # alto / ancho en píxeles
-                        logo_height = logo_width * aspect_ratio
-                    
-                        # 3. Definir el margen desde los bordes del mapa
-                        margin_x = map_width * 0.02 # 2% de margen horizontal
-                        margin_y = (total_maxy - total_miny) * 0.02 # 2% de margen vertical
-                    
-                        # 4. Calcular la coordenada de la esquina inferior-izquierda (x, y) del logo
-                        # Para la X: Borde derecho del mapa - margen - ancho del logo
-                        logo_x = total_maxx - margin_x - logo_width
-                        # Para la Y: Borde inferior del mapa + margen
-                        logo_y = total_miny + margin_y
-                    
-                        # 5. Dibujar el logo en la posición calculada
-                        ax.imshow(geodata["logo"], 
-                                  extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height],
-                                  aspect='auto', zorder=10) # Usar un zorder alto para que siempre esté encima
-                    
                 
-                    ax.grid(True, linestyle=':', alpha=0.6, color='black')
-                    
-                    # Guardar la figura sin bbox_inches='tight' para evitar el error
-                    png_buffer = io.BytesIO()
-                    fig.savefig(png_buffer, format="png", dpi=300,
-                                facecolor='white', edgecolor='none',
-                                bbox_inches='tight', pad_inches=0.2)
-                    png_buffer.seek(0)
-                    
-                    # Almacenar los resultados en el estado de sesión
-                    st.session_state.figure = fig
-                    st.session_state.raster_io = raster_io
-                    st.session_state.png_buffer = png_buffer
-                    st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
-                    st.session_state.map_generated = True
-        
-                    # Configurar el panel de estadísticas
-                    desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
-                    report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-                    stats_md = f"""
-                    ### Resumen del Reporte
-                    - **Fecha de Corte:** {report_date_str_formatted}
-                    - **Estaciones Válidas:** {len(stations_filtered_gdf)}
-                    - **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}
-                    """
-                    st.session_state.stats_panel_md = {
-                        "header": stats_md,
-                        "total_df_con_na": total_df_con_na.rename(columns={'P_mm': 'Precip. (mm)'}),
-                        "outliers_df": outliers_df.rename(columns={'P_mm': 'Precip. (mm)'}),
-                        "desc_stats": desc_stats,
-                        "metrics_df": metrics_df
-                    }
-        
-
-                    st.rerun()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+                if geodata["logo"] is not None:
+                    logo_width = total_width * 0.15
+                    aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1]
+                    logo_height = logo_width * aspect_ratio
+                    margin_x = total_width * 0.02
+                    margin_y = (total_maxy - total_miny) * 0.02
+                    logo_x = total_maxx - margin_x - logo_width
+                    logo_y = total_miny + margin_y
+                    ax.imshow(geodata["logo"], extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height], aspect='auto', zorder=10)
+                
+                ax.grid(True, linestyle=':', alpha=0.6, color='black')
+                
+                png_buffer = io.BytesIO()
+                fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
+                png_buffer.seek(0)
+                
+                st.session_state.figure = fig
+                st.session_state.raster_io = raster_io
+                st.session_state.png_buffer = png_buffer
+                st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
+                st.session_state.map_generated = True
+    
+                desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
+                report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
+                stats_md = f"""
+                ### Resumen del Reporte
+                - **Fecha de Corte:** {report_date_str_formatted}
+                - **Estaciones Válidas:** {len(stations_filtered_gdf)}
+                - **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}
+                """
+                st.session_state.stats_panel_md = {
+                    "header": stats_md,
+                    "total_df_con_na": total_df_con_na.rename(columns={'P_mm': 'Precip. (mm)'}),
+                    "outliers_df": outliers_df.rename(columns={'P_mm': 'Precip. (mm)'}),
+                    "desc_stats": desc_stats,
+                    "metrics_df": metrics_df
+                }
+    
+                st.rerun()
