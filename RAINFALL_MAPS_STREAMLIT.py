@@ -57,24 +57,41 @@ st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
 st.markdown("""
 <style>
 /* --- ESTILO PARA BOTONES PRINCIPALES --- */
-/* Apunta al botón principal (el que tiene el fondo de color) */
 div[data-testid="stButton"] > button {
-    background-color: #0D6AB7; /* Azul SAPAL */
-    color: white;
-    border: 1px solid #0D6AB7;
+    background-color: #0D6AB7; color: white; border: 1px solid #0D6AB7;
 }
-/* Estilo para cuando el cursor está sobre el botón */
 div[data-testid="stButton"] > button:hover {
-    background-color: #0A5591; /* Azul más oscuro */
-    color: white;
-    border: 1px solid #0A5591;
+    background-color: #0A5591; color: white; border: 1px solid #0A5591;
 }
 
 /* --- ESTILO PARA BOTONES DE OPCIÓN (RADIO) --- */
-/* Apunta al círculo de color del radio button cuando está seleccionado */
 div[data-testid="stRadio"] input:checked + div > span {
-    background-color: #0D6AB7 !important; /* Forza el color azul SAPAL */
-    border-color: #0D6AB7 !important;     /* Forza el borde azul SAPAL */
+    background-color: #0D6AB7 !important; border-color: #0D6AB7 !important;
+}
+
+/* --- NUEVO: ESTILOS PARA ANIMACIÓN DE TEXTO --- */
+/* Contenedor para centrar vertical y horizontalmente */
+.center-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 400px; /* Altura fija para el centrado vertical */
+}
+/* Estilo del texto que va a girar */
+.spinning-text {
+    font-size: 1.5em; /* Tamaño de letra */
+    font-weight: bold;
+    color: #FAFAFA;
+    animation: spin 4s linear infinite; /* Aplica la animación 'spin' */
+}
+/* Definición de la animación de giro */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -524,58 +541,37 @@ def display_sidebar_info():
 col_info, col_mapa = st.columns([2, 3]) # Columna izquierda más angosta (ratio 2:3)
 
 if st.session_state.map_generated:
-    # --- VISTA DE RESULTADOS ---
+    # --- VISTA DE RESULTADOS (MODIFICADA) ---
     with col_info:
         display_sidebar_info()
         
-        st.header("Descargar Resultados")
+        # --- 1. TÍTULO CENTRADO ---
+        st.markdown("<h3 style='text-align: center;'>Descargar Resultados</h3>", unsafe_allow_html=True)
         
-        # --- CONTENEDOR PARA UNIFICAR EL ANCHO DE LOS BOTONES ---
-        # Creamos 3 columnas: una vacía a la izq, una central para los botones, y una vacía a la der.
+        # Contenedor para unificar el ancho de los botones
         _ , btn_container, _ = st.columns([1, 4, 1])
-
-        # Colocamos todos los elementos dentro de la columna central 'btn_container'
         with btn_container:
-            st.download_button(
-                label="Descargar Datos Geoespaciales (.tif)", 
-                data=st.session_state.raster_io, 
-                file_name=f"Precipitacion_{st.session_state.report_date_str}.tif", 
-                mime="image/tiff",
-                use_container_width=True  # Forzar a que ocupe el ancho del contenedor
-            )
-            st.download_button(
-                label="Descargar Imagen del Mapa (.png)", 
-                data=st.session_state.png_buffer, 
-                file_name=f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", 
-                mime="image/png",
-                use_container_width=True  # Forzar a que ocupe el ancho del contenedor
-            )
-            
-            # El expander también se adaptará al ancho de 'btn_container'
+            # ... (el código de los botones y el expander no cambia)
+            st.download_button(label="Descargar Datos Geoespaciales (.tif)", data=st.session_state.raster_io, file_name=f"Precipitacion_{st.session_state.report_date_str}.tif", mime="image/tiff", use_container_width=True)
+            st.download_button(label="Descargar Imagen del Mapa (.png)", data=st.session_state.png_buffer, file_name=f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", mime="image/png", use_container_width=True)
             with st.expander("Ver Resumen y Detalles de los Datos"):
                 if st.session_state.stats_panel_md:
                     stats = st.session_state.stats_panel_md
-                    st.markdown(stats["header"])
-                    st.subheader("Datos Crudos Extraídos")
-                    st.dataframe(stats["total_df_con_na"].set_index('Name'))
-                    if not stats["outliers_df"].empty:
-                        st.subheader("Valores Atípicos Excluidos")
-                        st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
-                    st.subheader("Estadísticas Descriptivas")
-                    st.dataframe(stats["desc_stats"])
-                    if stats["metrics_df"] is not None:
-                        st.subheader("Rendimiento de Interpolación")
-                        st.dataframe(stats["metrics_df"].set_index('Método'))
-            
-            if st.button("Realizar Otro Análisis", use_container_width=True): # Forzar a que ocupe el ancho
-                reset_analysis()
-                st.rerun()
+                    st.markdown(stats["header"]); st.subheader("Datos Crudos Extraídos"); st.dataframe(stats["total_df_con_na"].set_index('Name'))
+                    if not stats["outliers_df"].empty: st.subheader("Valores Atípicos Excluidos"); st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
+                    st.subheader("Estadísticas Descriptivas"); st.dataframe(stats["desc_stats"])
+                    if stats["metrics_df"] is not None: st.subheader("Rendimiento de Interpolación"); st.dataframe(stats["metrics_df"].set_index('Método'))
+            if st.button("Realizar Otro Análisis", use_container_width=True): reset_analysis(); st.rerun()
 
     with col_mapa:
-        st.info("✔️ ¡Reporte generado con éxito!")
+        st.success("✔️ ¡Reporte generado con éxito!")
         st.header("Mapa de Distribución Pluvial")
-        st.pyplot(st.session_state.figure)
-
+        
+        # --- 2. MAPA MÁS PEQUEÑO ---
+        # Creamos columnas para dejar márgenes a los lados y hacer el mapa más angosto
+        _ , map_container, _ = st.columns([1, 5, 1])
+        with map_container:
+            st.pyplot(st.session_state.figure)
 else:
     # --- VISTA DE CONFIGURACIÓN ---
     with col_info:
@@ -660,7 +656,7 @@ else:
                         log_container.markdown("\n\n".join(log_messages))
                         interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
                     
-                    fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
+                    fig, ax = plt.subplots(figsize=(12, 9), facecolor='white')
                     ax.set_facecolor('white')
                     fig.patch.set_facecolor('white')
                     fig.subplots_adjust(right=0.7)
@@ -762,11 +758,19 @@ else:
                     
                     st.rerun()
 
+    # ... (código de 'with col_info:' no cambia)
+
     with col_mapa:
-        st.markdown(" ## El mapa se mostrará aquí una vez que generes el reporte.")
-        st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
-        # Opcional: Mostrar una imagen de fondo o el logo
+        # --- 3. PLACEHOLDER ANIMADO ---
+        st.markdown("""
+        <div class="center-container">
+            <div class="spinning-text">
+                El mapa se mostrará aquí...
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
         
+
 
 
 
