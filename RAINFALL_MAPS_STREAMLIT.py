@@ -53,8 +53,11 @@ warnings.simplefilter('ignore', InsecureRequestWarning)
 # --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 # 1. ESTABLECER LA CONFIGURACIÓN DE LA PÁGINA (DEBE SER EL PRIMER COMANDO DE STREAMLIT)
 st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
-# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (ACTUALIZADO) ---
-# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON ANIMACIONES AVANZADAS) ---
+
+
+# --- INICIALIZACIÓN DE ESTADO DE SESIÓN Y OTRAS CONFIGURACIONES ---
+os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
+# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON EFECTO ORBITAL) ---
 st.markdown("""
 <style>
 /* --- ESTILOS PARA BOTONES Y RADIO (sin cambios) --- */
@@ -68,28 +71,36 @@ div[data-testid="stRadio"] input:checked + div > span {
     background-color: #0D6AB7 !important; border-color: #0D6AB7 !important;
 }
 
-/* --- NUEVOS ESTILOS PARA EL PLACEHOLDER ANIMADO --- */
+/* --- NUEVOS ESTILOS PARA EL PLACEHOLDER ORBITAL --- */
 
 /* Contenedor principal para centrar todo */
 .center-container {
     display: flex;
-    flex-direction: column; /* Apila el globo y el texto verticalmente */
     justify-content: center;
     align-items: center;
-    height: 400px; /* Altura para el centrado vertical */
+    height: 400px;
 }
 
-/* Estilo y animación para el globo terráqueo */
+/* Contenedor del sistema orbital, para posicionar el texto relativo al globo */
+.orbit-container {
+    position: relative;
+    width: 200px;
+    height: 200px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* Estilo del globo terráqueo (sin cambios en la animación del fondo) */
 .spinning-globe {
+    position: absolute;
     width: 150px;
     height: 150px;
     border-radius: 50%;
-    /* Usamos una textura de mapa del mundo como fondo */
     background: url('https://www.patorjk.com/misc/gifs/maps/map-2000-0-0-2-1-3-0.png');
-    background-size: 200% auto; /* El 200% es clave para la animación de bucle */
+    background-size: 200% auto;
     animation: spin-globe 10s linear infinite;
     box-shadow: inset 0 0 20px rgba(0,0,0,0.4), 0 0 15px rgba(255,255,255,0.1);
-    margin-bottom: 20px; /* Espacio entre el globo y el texto */
 }
 
 @keyframes spin-globe {
@@ -97,33 +108,38 @@ div[data-testid="stRadio"] input:checked + div > span {
     to { background-position: 200% 0%; }
 }
 
-/* Contenedor para crear el efecto de perspectiva 3D */
-.text-perspective-container {
-    perspective: 500px;
-}
-
-/* Estilo y animación para el texto rotando en 3D */
-.rotating-text-3d {
-    font-size: 1.5em;
-    font-weight: bold;
+/* Estilo del texto que orbitará */
+.orbiting-text {
+    position: absolute;
     color: #FAFAFA;
-    text-transform: uppercase;
-    animation: rotate-text-y 6s linear infinite;
+    font-size: 1.2em;
+    font-weight: bold;
+    white-space: nowrap; /* Evita que el texto se parta en dos líneas */
+    animation: orbit 8s linear infinite;
     transform-style: preserve-3d;
 }
 
-@keyframes rotate-text-y {
-    from { transform: rotateY(0deg); }
-    to { transform: rotateY(360deg); }
+/* La animación clave que crea el efecto de órbita elíptica */
+@keyframes orbit {
+    0% {
+        transform: rotateZ(-15deg) rotateY(-60deg) translateX(100px) scaleY(0.7);
+        opacity: 1;
+        z-index: 10; /* El texto está por delante */
+    }
+    50% {
+        transform: rotateZ(-15deg) rotateY(60deg) translateX(100px) scaleY(0.7);
+        opacity: 0.3; /* El texto se desvanece al ir "detrás" */
+        z-index: -10; /* El texto está por detrás */
+    }
+    100% {
+        transform: rotateZ(-15deg) rotateY(-60deg) translateX(100px) scaleY(0.7);
+        opacity: 1;
+        z-index: 10;
+    }
 }
 </style>
 """, unsafe_allow_html=True)
 # --- FIN DEL BLOQUE DE ESTILOS ---
-# --- FIN DEL BLOQUE DE ESTILOS ---
-
-# --- INICIALIZACIÓN DE ESTADO DE SESIÓN Y OTRAS CONFIGURACIONES ---
-os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
-
 # Intenta configurar el idioma y muestra la advertencia si falla (esto ya es seguro)
 try:
     locale.setlocale(locale.LC_TIME, 'es_ES.UTF-8')
@@ -680,7 +696,7 @@ else:
                         log_container.markdown("\n\n".join(log_messages))
                         interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
                     
-                    fig, ax = plt.subplots(figsize=(12, 9), facecolor='white')
+                    fig, ax = plt.subplots(figsize=(14, 11), facecolor='white')
                     ax.set_facecolor('white')
                     fig.patch.set_facecolor('white')
                     fig.subplots_adjust(right=0.7)
@@ -785,18 +801,17 @@ else:
     # ... (código de 'with col_info:' no cambia)
 
     with col_mapa:
-        # --- NUEVO PLACEHOLDER CON GLOBO Y TEXTO 3D ---
+        # --- NUEVO PLACEHOLDER CON TEXTO ORBITAL ---
         st.markdown("""
         <div class="center-container">
-            <div class="spinning-globe"></div>
-            <div class="text-perspective-container">
-                <div class="rotating-text-3d">
-                    El mapa se mostrará aquí
-                </div>
+            <div class="orbit-container">
+                <div class="spinning-globe"></div>
+                <div class="orbiting-text">El mapa se mostrará aquí...</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
