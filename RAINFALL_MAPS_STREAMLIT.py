@@ -59,48 +59,33 @@ st.set_page_config(page_title="Reporte Pluvial de León", layout="wide")
 os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON EFECTO ORBITAL) ---
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON SPINNER) ---
+# --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON BARRA DE PROGRESO) ---
 st.markdown("""
 <style>
 /* --- ESTILOS PARA BOTONES Y RADIO (sin cambios) --- */
-div[data-testid="stButton"] > button {
-    background-color: #0D6AB7; color: white; border: 1px solid #0D6AB7;
-}
-div[data-testid="stButton"] > button:hover {
-    background-color: #0A5591; color: white; border: 1px solid #0A5591;
-}
-div[data-testid="stRadio"] input:checked + div > span {
-    background-color: #0D6AB7 !important; border-color: #0D6AB7 !important;
-}
+div[data-testid="stButton"] > button { background-color: #0D6AB7; color: white; border: 1px solid #0D6AB7; }
+div[data-testid="stButton"] > button:hover { background-color: #0A5591; color: white; border: 1px solid #0A5591; }
+div[data-testid="stRadio"] input:checked + div > span { background-color: #0D6AB7 !important; border-color: #0D6AB7 !important; }
 
-/* --- NUEVO ESTILO PARA EL SPINNER DE CARGA --- */
-
-/* Contenedor para centrar el spinner */
-.center-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 400px;
+/* --- NUEVO ESTILO PARA LA BARRA DE PROGRESO CIRCULAR --- */
+.center-container { display: flex; justify-content: center; align-items: center; height: 400px; }
+.progress-circle-container { position: relative; width: 120px; height: 120px; }
+.progress-circle {
+    width: 120px; height: 120px; border-radius: 50%;
+    /* El truco: un gradiente cónico que se actualiza con una variable CSS */
+    background: conic-gradient(#0D6AB7 var(--progress), #444 0);
+    display: flex; justify-content: center; align-items: center;
+    transition: background 0.2s; /* Transición suave */
 }
-
-/* Estilo y animación del spinner */
-.custom-spinner {
-    width: 80px;
-    height: 80px;
-    border-radius: 50%;
-    /* El truco: un borde gris y solo la parte de arriba azul */
-    border: 8px solid #444; /* Color de la pista/fondo del círculo */
-    border-top-color: #0D6AB7; /* Color azul SAPAL para el segmento que gira */
-    animation: spin 1s linear infinite;
+.progress-circle-inner {
+    width: 100px; height: 100px; border-radius: 50%;
+    background: #0E1117; /* Mismo color que el fondo de la app */
+    display: flex; justify-content: center; align-items: center;
 }
-
-/* Animación de giro simple */
-@keyframes spin {
-    to {
-        transform: rotate(360deg);
-    }
-}
+.progress-text { font-size: 1.8em; font-weight: bold; color: #FAFAFA; }
 </style>
 """, unsafe_allow_html=True)
+# --- FIN DEL BLOQUE DE ESTILOS ---
 # --- FIN DEL BLOQUE DE ESTILOS ---
 # --- FIN DEL BLOQUE DE ESTILOS ---
 # Intenta configurar el idioma y muestra la advertencia si falla (esto ya es seguro)
@@ -117,6 +102,8 @@ if 'map_generated' not in st.session_state:
     st.session_state.png_buffer = None
     st.session_state.report_date_str = ""
     st.session_state.stats_panel_md = None
+    st.session_state.processing_state = 'idle' # 'idle' o 'processing'
+    st.session_state.progress_percent = 0
 
 # Ahora el resto de la interfaz puede comenzar
 st.title("💧 Generador de Reportes Pluviales para León, Gto.")
@@ -567,7 +554,7 @@ if st.session_state.map_generated:
             if st.button("Realizar Otro Análisis", use_container_width=True): reset_analysis(); st.rerun()
 
     with col_mapa:
-        st.success("✔️ ¡Reporte generado con éxito!")
+        st.info("✔️ ¡Reporte generado con éxito!")
         st.header("Mapa de Distribución Pluvial")
         
         # --- 2. MAPA MÁS PEQUEÑO ---
@@ -576,19 +563,13 @@ if st.session_state.map_generated:
         with map_container:
             st.pyplot(st.session_state.figure)
 else:
-    # --- VISTA DE CONFIGURACIÓN ---
+    # --- VISTA DE CONFIGURACIÓN Y PROCESAMIENTO ---
     with col_info:
+        # La columna de información no cambia mucho
         display_sidebar_info()
-        
         st.header("1. Selecciona el tipo de reporte")
-        report_option = st.radio(
-            "Elige las estaciones a incluir:",
-            ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'),
-            index=1,
-            key="report_option"
-        )
+        report_option = st.radio("Elige las estaciones a incluir:", ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'), index=1, key="report_option")
         st.info("Añadir las estaciones de CONAGUA mejora la precisión del mapa.")
-
         st.header("2. Confirma la fecha del reporte")
         report_date = None
 
@@ -596,8 +577,7 @@ else:
             report_date = datetime.now()
             st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
         else:
-            with st.spinner("Buscando la última fecha de CONAGUA..."):
-                latest_conagua_date = get_latest_conagua_date(locations_conagua)
+            with st.spinner("Buscando la última fecha de CONAGUA..."): latest_conagua_date = get_latest_conagua_date(locations_conagua)
             if latest_conagua_date:
                 report_date = latest_conagua_date
                 st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
@@ -606,160 +586,171 @@ else:
                 st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
                 st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
 
-        if st.button("Generar Reporte Pluvial", type="primary", use_container_width=True):
-            if report_date is None:
-                st.error("No se pudo determinar una fecha para el reporte.")
+        # El botón ahora solo cambia el estado para iniciar el procesamiento
+        if st.button("🚀 Generar Reporte Pluvial", type="primary", use_container_width=True):
+            if report_date:
+                st.session_state.processing_state = 'processing'
+                st.session_state.progress_percent = 0
+                st.session_state.report_date_to_process = report_date
+                st.session_state.report_option_to_process = report_option
+                st.rerun()
             else:
-                # El código de procesamiento se ejecuta aquí dentro
-                log_expander = st.expander("Ver progreso de la extracción...", expanded=True)
-                log_container = log_expander.empty()
-                log_messages = ["Iniciando proceso..."]
-                log_container.markdown("\n\n".join(log_messages))
-        
-                report_date_pd = pd.to_datetime(report_date.date())
-                start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
-        
-                with st.spinner('Extrayendo y procesando datos...'):
-                    # ... [EL CÓDIGO DE PROCESAMIENTO LARGO NO CAMBIA] ...
-                    total_df = pd.DataFrame()
-                    sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, log_messages, log_container)
-                    if "CONAGUA" in report_option:
-                        conagua_df = fetch_conagua_data(locations_conagua, start_of_year, report_date_pd, log_messages, log_container)
-                        total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
-                    else:
-                        total_df = sapal_df
-        
-                    total_df_con_na = total_df.copy()
-        
-                    if total_df.dropna(subset=['P_mm']).empty:
-                        st.error("Error Crítico: No se encontraron datos de precipitación válidos.")
-                        st.stop()
-        
-                    log_messages.append("--- Extracción finalizada. Procesando datos... ---")
-                    log_container.markdown("\n\n".join(log_messages))
-        
-                    updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
-                    if 'P_mm_y' in updated_stations_gdf.columns:
-                        updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
-                    if 'P_mm_x' in updated_stations_gdf.columns:
-                        updated_stations_gdf = updated_stations_gdf.drop(columns=['P_mm_x'])
-                    
-                    stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
-                    if not stations_filtered_gdf.empty:
-                        stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
-                    else:
-                        outliers_df = pd.DataFrame()
-                    
-                    if len(stations_filtered_gdf) < 5:
-                        st.warning(f"Se necesitan al menos 5 estaciones válidas para interpolar. Se generará un mapa base.")
-                        interpolation_results = None
-                        metrics_df = None
-                    else:
-                        log_messages.append("--- Generando mapa de interpolación... ---")
-                        log_container.markdown("\n\n".join(log_messages))
-                        interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
-                    
-                    fig, ax = plt.subplots(figsize=(14, 11), facecolor='white')
-                    ax.set_facecolor('white')
-                    fig.patch.set_facecolor('white')
-                    fig.subplots_adjust(right=0.7)
-                    
-                    limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
-                    cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
-                    
-                    lim_bounds = limite_gdf.total_bounds
-                    cue_bounds = cuenca_gdf.total_bounds
-                    
-                    total_minx, total_miny, total_maxx, total_maxy = min(lim_bounds[0], cue_bounds[0]), min(lim_bounds[1], cue_bounds[1]), max(lim_bounds[2], cue_bounds[2]), max(lim_bounds[3], cue_bounds[3])
-                    
-                    total_width, total_height = total_maxx - total_minx, total_maxy - total_miny
-                    x_margin, y_margin = total_width * 0.05, total_height * 0.05
-                    
-                    ax.set_xlim(total_minx - x_margin, total_maxx + x_margin)
-                    ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
-                    
-                    boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
-                    clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
-                    hillshade_data = clipped_hillshade[0].astype(float)
-                    hillshade_data[hillshade_data == 255] = np.nan
-                    
-                    ax.imshow(hillshade_data, extent=[clipped_transform[2], clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1], clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0], clipped_transform[5]], cmap='gray', alpha=0.7, aspect='equal', zorder=1)
-                    
-                    if interpolation_results and np.any(interpolation_results["raster_image"]):
-                        raster_image = np.ma.masked_invalid(interpolation_results["raster_image"])
-                        raster_meta = interpolation_results["raster_meta"]
-                        custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
-                        precip_min, precip_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
-                        show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
-                        raster_io = interpolation_results['raster_io']
-                    else:
-                        raster_io = None
-                    
-                    streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs)
-                    streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
-                    
-                    for spine in ax.spines.values():
-                        spine.set_edgecolor('black')
-                        spine.set_linewidth(1)
-                    
-                    geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
-                    geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
-                    geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, clip_on=False, zorder=4)
-                    geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
-                    
-                    if not stations_filtered_gdf.empty:
-                        stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
-                        stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
+                st.error("No se pudo determinar una fecha para el reporte.")
 
-                    ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
-                    ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
-                    ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
-                    ax.set_xlabel(""); ax.set_ylabel("")
-                    add_north_arrow(ax)
-                    
-                    scale_length_m, scale_segments = 5000, 5
-                    scale_x, scale_y = (total_minx + total_width * 0.02), (total_miny + total_height * 0.02)
-                    segment_length, bar_height = scale_length_m / scale_segments, total_height * 0.007
-                    for i in range(scale_segments):
-                        color = 'black' if i % 2 == 0 else 'white'
-                        ax.add_patch(plt.Rectangle((scale_x + i * segment_length, scale_y), segment_length, bar_height, facecolor=color, edgecolor='black', linewidth=1, zorder=10))
-                    text_y_pos = scale_y - total_height * 0.008
-                    ax.text(scale_x, text_y_pos, '0', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
-                    ax.text(scale_x + scale_length_m / 2, text_y_pos, '2.5', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
-                    ax.text(scale_x + scale_length_m, text_y_pos, '5 km', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
-                    
-                    legend_elements = [Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'), Patch(facecolor='none', edgecolor='black', linewidth=1, label='LÍMITE URBANO'), Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'), Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'), Line2D([0], [0], color='#10008C', lw=1, label='CORRIENTES DE AGUA'), Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA', markerfacecolor='#55FF00', markeredgecolor='black', markersize=8, linestyle='None'), Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL', markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None')]
-                    legend_ax = ax.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10, title='SIMBOLOGÍA', title_fontsize=12, frameon=True, edgecolor='black', facecolor='white')
-                    legend_ax.get_title().set_fontweight('bold')
+    with col_mapa:
+        # El contenido de esta columna depende del estado de procesamiento
+        if st.session_state.processing_state == 'processing':
+            # Muestra la barra de progreso
+            progress = st.session_state.progress_percent
+            st.markdown(f"""
+            <div class="center-container">
+                <div class="progress-circle-container">
+                    <div class="progress-circle" style="--progress: {progress}%;">
+                        <div class="progress-circle-inner">
+                            <span class="progress-text">{progress}%</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.info("Procesando datos... Por favor, espera.")
+        else:
+            # Muestra un texto de bienvenida
+             st.markdown("""
+            <div class="center-container">
+                <h3 style="text-align: center;">Listo para generar el reporte</h3>
+            </div>
+            """, unsafe_allow_html=True)
 
-                    if interpolation_results and np.any(interpolation_results["raster_image"]):
-                        cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])
-                        norm = Normalize(vmin=precip_min, vmax=precip_max)
-                        cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm, orientation='vertical')
-                        cb.ax.set_title('Precipitación\nAcumulada (mm)', size=10, weight='bold', pad=15)
-                        cb.ax.tick_params(labelsize=9)
-                        for spine in cbar_ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
-                    
-                    if geodata["logo"] is not None:
-                        aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1]
-                        logo_width = total_width * 0.15; logo_height = logo_width * aspect_ratio
-                        logo_x, logo_y = (total_maxx - total_width * 0.02 - logo_width), (total_miny + total_height * 0.02)
-                        ax.imshow(geodata["logo"], extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height], aspect='auto', zorder=10)
-                    
-                    ax.grid(True, linestyle=':', alpha=0.6, color='black')
-                    
-                    png_buffer = io.BytesIO()
-                    fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
-                    png_buffer.seek(0)
-                    
-                    st.session_state.figure, st.session_state.raster_io, st.session_state.png_buffer, st.session_state.report_date_str, st.session_state.map_generated = fig, raster_io, png_buffer, report_date_pd.strftime('%Y%m%d'), True
-                    
-                    desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
-                    report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-                    stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
-                    st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": total_df_con_na.rename(columns={'P_mm': 'Precip. (mm)'}), "outliers_df": outliers_df.rename(columns={'P_mm': 'Precip. (mm)'}), "desc_stats": desc_stats, "metrics_df": metrics_df}
-                    
-                    st.rerun()
+    # --- LÓGICA DE PROCESAMIENTO ---
+    # Este bloque solo se ejecuta cuando el estado es 'processing'
+    if st.session_state.processing_state == 'processing':
+        # Recuperamos los parámetros guardados
+        report_date = st.session_state.report_date_to_process
+        report_option = st.session_state.report_option_to_process
+
+        # Simulamos un log en la columna de información
+        with col_info:
+            log_expander = st.expander("Ver progreso detallado...", expanded=True)
+            log_container = log_expander.empty()
+            log_messages = ["Iniciando proceso..."]
+            log_container.markdown("\n\n".join(log_messages))
+        
+        # --- ETAPA 1: EXTRACCIÓN SAPAL ---
+        report_date_pd = pd.to_datetime(report_date.date())
+        sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, log_messages, log_container)
+        st.session_state.progress_percent = 25
+        st.rerun() # Detenemos aquí para que la UI se actualice
+
+    # ... (El script se detiene aquí y se re-ejecuta por el rerun)
+    # En la siguiente ejecución, el progreso será 25 y continuará desde aquí...
+
+    if st.session_state.progress_percent == 25:
+        with col_info: # Re-obtenemos el log container
+            log_expander = st.expander("Ver progreso detallado...", expanded=True)
+            log_container = log_expander.empty()
+        # --- ETAPA 2: EXTRACCIÓN CONAGUA (si es necesario) ---
+        report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+        start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
+        
+        # Reconstruimos el DataFrame de SAPAL desde la etapa anterior (esto es importante)
+        sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, [], st.empty()) # Ejecutamos rápido sin logs
+        
+        if "CONAGUA" in st.session_state.report_option_to_process:
+            conagua_df = fetch_conagua_data(locations_conagua, start_of_year, report_date_pd, [], log_container)
+            total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
+        else:
+            total_df = sapal_df
+
+        st.session_state.total_df_processed = total_df # Guardamos el resultado intermedio
+        st.session_state.progress_percent = 60
+        st.rerun()
+
+    # --- ETAPA 3: INTERPOLACIÓN Y GENERACIÓN DEL MAPA ---
+    if st.session_state.progress_percent == 60:
+        total_df = st.session_state.total_df_processed
+        
+        # ... (Aquí va todo el código de procesamiento que tenías)
+        # (Desde 'total_df_con_na = total_df.copy()' hasta el final)
+        total_df_con_na = total_df.copy()
+        if total_df.dropna(subset=['P_mm']).empty: st.error("Error Crítico..."); st.stop()
+        updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
+        if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
+        stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
+        if not stations_filtered_gdf.empty: stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
+        else: outliers_df = pd.DataFrame()
+        if len(stations_filtered_gdf) < 5: interpolation_results, metrics_df = None, None
+        else: interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
+        
+        # Actualizamos el progreso antes de la parte más lenta (renderizado)
+        st.session_state.progress_percent = 90
+        st.rerun()
+
+    # --- ETAPA 4: RENDERIZADO FINAL DEL GRÁFICO ---
+    if st.session_state.progress_percent == 90:
+        # Reconstruimos las variables necesarias de la etapa anterior
+        total_df = st.session_state.total_df_processed
+        total_df_con_na = total_df.copy()
+        updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
+        if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
+        stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
+        if not stations_filtered_gdf.empty: stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
+        else: outliers_df = pd.DataFrame()
+        if len(stations_filtered_gdf) < 5: interpolation_results, metrics_df = None, None
+        else: interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
+
+        # --- AQUÍ VA TODO EL CÓDIGO DE MATPLOTLIB PARA DIBUJAR EL MAPA ---
+        fig, ax = plt.subplots(figsize=(12, 9), facecolor='white')
+        # ... (pega aquí todo tu código de ploteo, desde fig, ax... hasta fig.savefig(...))
+        ax.set_facecolor('white'); fig.patch.set_facecolor('white'); fig.subplots_adjust(right=0.7)
+        limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs); cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
+        lim_bounds = limite_gdf.total_bounds; cue_bounds = cuenca_gdf.total_bounds
+        total_minx, total_miny, total_maxx, total_maxy = min(lim_bounds[0], cue_bounds[0]), min(lim_bounds[1], cue_bounds[1]), max(lim_bounds[2], cue_bounds[2]), max(lim_bounds[3], cue_bounds[3])
+        total_width, total_height = total_maxx - total_minx, total_maxy - total_miny
+        x_margin, y_margin = total_width * 0.05, total_height * 0.05
+        ax.set_xlim(total_minx - x_margin, total_maxx + x_margin); ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
+        boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
+        clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
+        hillshade_data = clipped_hillshade[0].astype(float); hillshade_data[hillshade_data == 255] = np.nan
+        ax.imshow(hillshade_data, extent=[clipped_transform[2], clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1], clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0], clipped_transform[5]], cmap='gray', alpha=0.7, aspect='equal', zorder=1)
+        if interpolation_results and np.any(interpolation_results["raster_image"]):
+            raster_image = np.ma.masked_invalid(interpolation_results["raster_image"]); raster_meta = interpolation_results["raster_meta"]
+            custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
+            precip_min, precip_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
+            show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
+            raster_io = interpolation_results['raster_io']
+        else: raster_io = None
+        streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs); streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
+        for spine in ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
+        geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
+        geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, clip_on=True, zorder=4)
+        geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF8C00', linewidth=1.5, clip_on=False, zorder=4)
+        geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, clip_on=True, zorder=5)
+        if not stations_filtered_gdf.empty:
+            stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
+            stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
+        report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+        ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
+        ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+        ax.set_xlabel(""); ax.set_ylabel("")
+        add_north_arrow(ax)
+        png_buffer = io.BytesIO()
+        fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
+        png_buffer.seek(0)
+        # --------------------------------------------------------------------
+
+        # --- FINALIZACIÓN: GUARDAR TODO Y CAMBIAR DE VISTA ---
+        st.session_state.figure, st.session_state.raster_io, st.session_state.png_buffer, st.session_state.report_date_str = fig, raster_io, png_buffer, report_date_pd.strftime('%Y%m%d')
+        desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
+        report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
+        stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
+        st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": total_df_con_na.rename(columns={'P_mm': 'Precip. (mm)'}), "outliers_df": outliers_df.rename(columns={'P_mm': 'Precip. (mm)'}), "desc_stats": desc_stats, "metrics_df": metrics_df}
+        
+        st.session_state.map_generated = True
+        st.session_state.processing_state = 'idle'
+        st.session_state.progress_percent = 100
+        st.rerun()
 
     # ... (código de 'with col_info:' no cambia)
 
@@ -771,6 +762,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
