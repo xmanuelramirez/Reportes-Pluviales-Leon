@@ -37,10 +37,31 @@ from matplotlib.lines import Line2D
 import pyproj
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
+
+# --- FUNCIÓN PARA OBTENER CHROME EN MODO HEADLESS ---
+import tempfile
+import uuid
+def get_headless_chrome_driver():
+    """
+    Devuelve un WebDriver de Chrome en modo headless (sin interfaz gráfica), usando un user-data-dir realmente único y evitando conflictos de puerto.
+    """
+    chrome_options = Options()
+    chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--window-size=1920,1080')
+    # Directorio temporal realmente único
+    user_data_dir = os.path.join(tempfile.gettempdir(), f"chrome-user-data-{uuid.uuid4().hex}")
+    chrome_options.add_argument(f'--user-data-dir={user_data_dir}')
+    # Puerto de depuración aleatorio para evitar conflictos
+    chrome_options.add_argument('--remote-debugging-port=0')
+    return webdriver.Chrome(options=chrome_options)
 from pykrige.ok import OrdinaryKriging
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from sklearn.model_selection import LeaveOneOut
@@ -340,86 +361,65 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
     los nombres del shapefile a los nombres cortos que la API espera.
     """
     results = []
-    log_messages.append("--- Iniciando extracción de SAPAL (API Dinámica, Mapeo Refinado)... ---")
+    log_messages.append("--- Extracción automática de SAPAL (si la API lo permite) ---")
     log_container.markdown("\n\n".join(log_messages))
 
+    # Lista de nombres EXACTOS que la API pública de SAPAL acepta
+    estaciones_publicas = [
+        "Centro", "Explora", "P Ibarrilla", "Santa Rosa", "Blvd La Luz",
+        "Cervantes", "Chapalita", "Insurgentes", "Pta Sta Ana", "Sapamilpa", "Torres Landa"
+    ]
+
     api_url = "https://www.sapal.gob.mx/api/v1/estaciones/concentrado"
-    report_date_str = report_date.strftime('%d-%m-%Y')
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Content-Type": "application/json;charset=UTF-8",
         "Referer": "https://www.sapal.gob.mx/estaciones-meteorologicas",
     }
-    
-    # --- FUNCIÓN TRADUCTORA MEJORADA ---
-    # Traduce los nombres de tu shapefile a los 11 nombres que la API pública entiende.
-    def get_api_name(shp_name):
-        name_lower = shp_name.lower()
-        
-        # Mapeo basado en palabras clave, ahora más preciso gracias a tu imagen.
-        if "explora" in name_lower: return "Explora"
-        if "ibarrilla" in name_lower: return "P Ibarrilla"
-        if "santa rosa" in name_lower: return "Santa Rosa"
-        if "morelos-madrazo" in name_lower: return "Blvd La Luz" # Este es el mapeo más probable
-        if name_lower == "centro": return "Centro"
-        if "jerez" in name_lower: return "Cervantes"
-        if "san juan" in name_lower: return "Chapalita"
-        if "insurgentes" in name_lower: return "Insurgentes"
-        if "pta. santa ana" in name_lower or "pta sta ana" in name_lower: return "Pta Sta Ana"
-        if "sapamilpa" in name_lower: return "Sapamilpa"
-        if "torres landa" in name_lower: return "Torres Landa"
-        
-        # Si no coincide con ninguna de las 11 públicas, devuelve None
-        return None 
+    session = requests.Session()
+    session.get("https://www.sapal.gob.mx/estaciones-meteorologicas", headers=headers, timeout=15)
 
-    for station_name_shp in stations:
-        api_station_name = get_api_name(station_name_shp)
-
-        if not api_station_name:
-            # Comportamiento esperado: Marca las estaciones no públicas como no disponibles.
-            log_messages.append(f"ℹ️ **SAPAL {station_name_shp}:** No es una estación pública en la API.")
-            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-            log_container.markdown("\n\n".join(log_messages))
-            continue
-
+    results = []
+    for api_station_name in estaciones_publicas:
+        report_date_str = report_date.strftime('%d-%m-%Y')
         payload = {
             "location": api_station_name, "period": "D",
             "startDate": report_date_str, "endDate": report_date_str
         }
-
         try:
-            response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+            response = session.post(api_url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
-            data = response.json()
-            registros = data.get("registro")
-            
-            if not registros:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** La API no devolvió datos para la fecha.")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            try:
+                data = response.json()
+            except Exception as e_json:
+                log_messages.append(f"❗ SAPAL {api_station_name}: Error JSON: {e_json}\nStatus code: {response.status_code}\nRespuesta: {response.text[:300]}")
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                log_container.markdown("\n\n".join(log_messages))
+                time.sleep(0.2)
                 continue
-            
+            registros = data.get("registro")
+            if not registros:
+                log_messages.append(f"⚠️ SAPAL {api_station_name}: La API no devolvió datos para la fecha.")
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                continue
             df_station = pd.DataFrame(registros)
-            
             if 'precipitacionanual' in df_station.columns:
                 df_station['precipitacionanual'] = pd.to_numeric(df_station['precipitacionanual'], errors='coerce')
                 last_valid_precip = df_station['precipitacionanual'].dropna().iloc[-1] if not df_station['precipitacionanual'].dropna().empty else np.nan
             else:
                 last_valid_precip = np.nan
-
             if pd.notna(last_valid_precip):
-                log_messages.append(f"✅ **SAPAL {station_name_shp}:** {last_valid_precip} mm")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': last_valid_precip})
+                log_messages.append(f"✅ SAPAL {api_station_name}: {last_valid_precip} mm")
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': last_valid_precip})
             else:
-                log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Dato no válido en la respuesta.")
-                results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        
-        except (requests.exceptions.RequestException, ValueError, requests.exceptions.JSONDecodeError) as e:
-            log_messages.append(f"⚠️ **SAPAL {station_name_shp}:** Error de API: {e}")
-            results.append({'Name': station_name_shp, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                log_messages.append(f"⚠️ SAPAL {api_station_name}: Dato no válido en la respuesta.")
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+        except Exception as e:
+            log_messages.append(f"⚠️ SAPAL {api_station_name}: Error de API: {e}")
+            results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         finally:
-             log_container.markdown("\n\n".join(log_messages))
-             time.sleep(0.2)
-
+            log_container.markdown("\n\n".join(log_messages))
+            time.sleep(0.2)
     return pd.DataFrame(results)
 
 def filter_outliers(gdf, column='P_mm'):
