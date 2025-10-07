@@ -530,41 +530,46 @@ if st.session_state.map_generated:
         
         st.header("Descargar Resultados")
         
-        # --- BOTONES CORREGIDOS ---
-        # Se eliminó el parámetro 'use_container_width=True' y los emojis.
-        st.download_button(
-            "Descargar Datos Geoespaciales (.tif)", 
-            st.session_state.raster_io, 
-            f"Precipitacion_{st.session_state.report_date_str}.tif", 
-            "image/tiff"
-        )
-        st.download_button(
-            "Descargar Imagen del Mapa (.png)", 
-            st.session_state.png_buffer, 
-            f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", 
-            "image/png"
-        )
-        
-        # Se eliminó el emoji del expander para consistencia.
-        with st.expander("Ver Resumen y Detalles de los Datos"):
-            if st.session_state.stats_panel_md:
-                stats = st.session_state.stats_panel_md
-                st.markdown(stats["header"])
-                st.subheader("Datos Crudos Extraídos")
-                st.dataframe(stats["total_df_con_na"].set_index('Name'))
-                if not stats["outliers_df"].empty:
-                    st.subheader("Valores Atípicos Excluidos")
-                    st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
-                st.subheader("Estadísticas Descriptivas")
-                st.dataframe(stats["desc_stats"])
-                if stats["metrics_df"] is not None:
-                    st.subheader("Rendimiento de Interpolación")
-                    st.dataframe(stats["metrics_df"].set_index('Método'))
-        
-        # Se eliminó 'use_container_width=True' y el emoji.
-        if st.button("Realizar Otro Análisis"):
-            reset_analysis()
-            st.rerun()
+        # --- CONTENEDOR PARA UNIFICAR EL ANCHO DE LOS BOTONES ---
+        # Creamos 3 columnas: una vacía a la izq, una central para los botones, y una vacía a la der.
+        _ , btn_container, _ = st.columns([1, 4, 1])
+
+        # Colocamos todos los elementos dentro de la columna central 'btn_container'
+        with btn_container:
+            st.download_button(
+                label="Descargar Datos Geoespaciales (.tif)", 
+                data=st.session_state.raster_io, 
+                file_name=f"Precipitacion_{st.session_state.report_date_str}.tif", 
+                mime="image/tiff",
+                use_container_width=True  # Forzar a que ocupe el ancho del contenedor
+            )
+            st.download_button(
+                label="Descargar Imagen del Mapa (.png)", 
+                data=st.session_state.png_buffer, 
+                file_name=f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", 
+                mime="image/png",
+                use_container_width=True  # Forzar a que ocupe el ancho del contenedor
+            )
+            
+            # El expander también se adaptará al ancho de 'btn_container'
+            with st.expander("Ver Resumen y Detalles de los Datos"):
+                if st.session_state.stats_panel_md:
+                    stats = st.session_state.stats_panel_md
+                    st.markdown(stats["header"])
+                    st.subheader("Datos Crudos Extraídos")
+                    st.dataframe(stats["total_df_con_na"].set_index('Name'))
+                    if not stats["outliers_df"].empty:
+                        st.subheader("Valores Atípicos Excluidos")
+                        st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
+                    st.subheader("Estadísticas Descriptivas")
+                    st.dataframe(stats["desc_stats"])
+                    if stats["metrics_df"] is not None:
+                        st.subheader("Rendimiento de Interpolación")
+                        st.dataframe(stats["metrics_df"].set_index('Método'))
+            
+            if st.button("Realizar Otro Análisis", use_container_width=True): # Forzar a que ocupe el ancho
+                reset_analysis()
+                st.rerun()
 
     with col_mapa:
         st.info("✔️ ¡Reporte generado con éxito!")
@@ -758,10 +763,11 @@ else:
                     st.rerun()
 
     with col_mapa:
-        st.markdown("El mapa se mostrará aquí una vez que generes el reporte.")
+        st.markdown(" ## El mapa se mostrará aquí una vez que generes el reporte.")
         st.info("Utiliza los controles en el panel de la izquierda para comenzar.")
         # Opcional: Mostrar una imagen de fondo o el logo
         
+
 
 
 
