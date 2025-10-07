@@ -537,22 +537,24 @@ else:
         if report_option == 'Solo Estaciones SAPAL':
             report_date = datetime.now()
             st.success(f"El reporte se generará con datos para el acumulado anual hasta hoy: **{report_date.strftime('%d de %B de %Y')}**")
+        # ... (código anterior)
         else:
             with st.spinner("Buscando la última fecha disponible en CONAGUA..."):
                 latest_conagua_date = get_latest_conagua_date(locations_conagua)
+
+            # LÓGICA CORREGIDA Y SIMPLIFICADA
             if latest_conagua_date:
                 report_date = latest_conagua_date
-                if latest_conagua_date:
-                    report_date = latest_conagua_date
-                    st.success(f"¡Listo! El reporte se generará con la fecha más reciente disponible en CONAGUA: **{report_date.strftime('%d de %B de %Y')}**")
-                else:
-                    # Este es el "Plan B" que estamos añadiendo
-                    report_date = datetime.now()
-                    st.warning(
-                        "⚠️ **No se pudo contactar a los servidores de CONAGUA para obtener la fecha más reciente.**"
-                        "\n\nSe usará la fecha de hoy como referencia. Los datos de CONAGUA podrían no estar actualizados."
-                    )
-                    st.info(f"El reporte se generará con fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
+                st.success(f"¡Listo! El reporte se generará con la fecha más reciente disponible en CONAGUA: **{report_date.strftime('%d de %B de %Y')}**")
+            else:
+                # Este es el "Plan B" que se ejecuta si la llamada a CONAGUA falla
+                report_date = datetime.now()
+                st.warning(
+                    "⚠️ **No se pudo contactar a los servidores de CONAGUA para obtener la fecha más reciente.**"
+                    "\n\nSe usará la fecha de hoy como referencia. Los datos de CONAGUA podrían no estar actualizados."
+                )
+                st.info(f"El reporte se generará con fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
+# ... (código siguiente)
         if st.button("🚀 Generar Reporte Pluvial", type="primary"):
             if report_date is None:
                 st.error("No se pudo determinar una fecha para el reporte.")
@@ -854,6 +856,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
