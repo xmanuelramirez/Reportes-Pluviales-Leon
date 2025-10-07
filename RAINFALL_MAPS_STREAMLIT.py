@@ -288,7 +288,6 @@ def get_latest_conagua_date(stations):
             # st.warning(f"Error al conectar con la estación {station}: {e}")
             continue
     return None
-from bs4 import BeautifulSoup
 import re
 
 # Asegúrate de que estas importaciones estén al principio de tu script
@@ -853,6 +852,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
