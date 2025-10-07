@@ -94,17 +94,25 @@ try:
 except locale.Error:
     st.warning("No se pudo configurar el idioma a español.")
 
-# Inicializa el estado de la sesión si no existe
+# Inicializa el estado de la sesión de forma robusta, clave por clave
 if 'map_generated' not in st.session_state:
     st.session_state.map_generated = False
+if 'figure' not in st.session_state:
     st.session_state.figure = None
+if 'raster_io' not in st.session_state:
     st.session_state.raster_io = None
+if 'png_buffer' not in st.session_state:
     st.session_state.png_buffer = None
+if 'report_date_str' not in st.session_state:
     st.session_state.report_date_str = ""
+if 'stats_panel_md' not in st.session_state:
     st.session_state.stats_panel_md = None
-    st.session_state.processing_state = 'idle' # 'idle' o 'processing'
+if 'processing_state' not in st.session_state:
+    st.session_state.processing_state = 'idle'
+if 'progress_percent' not in st.session_state:
     st.session_state.progress_percent = 0
-    st.session_state.log_messages = [] # Añadimos el log al estado
+if 'log_messages' not in st.session_state:
+    st.session_state.log_messages = []
 
 # Ahora el resto de la interfaz puede comenzar
 st.title("💧 Generador de Reportes Pluviales para León, Gto.")
@@ -721,6 +729,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
