@@ -519,7 +519,7 @@ if st.session_state.map_generated:
         reset_analysis()
         st.rerun()
 else:
-    # --- VISTA DE CONFIGURACIÓN (MODIFICADA) ---
+    # --- VISTA DE CONFIGURACIÓN (CORREGIDA) ---
     st.header("1. Selecciona el tipo de reporte")
     report_option = st.radio(
         "Elige las estaciones a incluir:",
@@ -528,35 +528,54 @@ else:
         key="report_option"
     )
     st.info("Añadir las estaciones de CONAGUA mejora la precisión del mapa, especialmente en los límites del municipio.")
-    
+
     st.header("2. Confirma la fecha del reporte")
     report_date = None
-    if report_option == 'Solo Estaciones SAPAL':
-        # ... (el resto del código de esta sección no necesita cambios, solo su indentación)
-        report_date = None
-        if report_option == 'Solo Estaciones SAPAL':
-            report_date = datetime.now()
-            st.success(f"El reporte se generará con datos para el acumulado anual hasta hoy: **{report_date.strftime('%d de %B de %Y')}**")
-        # ... (código anterior)
-        else:
-            with st.spinner("Buscando la última fecha disponible en CONAGUA..."):
-                latest_conagua_date = get_latest_conagua_date(locations_conagua)
 
-            # LÓGICA CORREGIDA Y SIMPLIFICADA
-            if latest_conagua_date:
-                report_date = latest_conagua_date
-                st.success(f"¡Listo! El reporte se generará con la fecha más reciente disponible en CONAGUA: **{report_date.strftime('%d de %B de %Y')}**")
-            else:
-                # Este es el "Plan B" que se ejecuta si la llamada a CONAGUA falla
-                report_date = datetime.now()
-                st.warning(
-                    "⚠️ **No se pudo contactar a los servidores de CONAGUA para obtener la fecha más reciente.**"
-                    "\n\nSe usará la fecha de hoy como referencia. Los datos de CONAGUA podrían no estar actualizados."
-                )
-                st.info(f"El reporte se generará con fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
-# ... (código siguiente)
-        if st.button("🚀 Generar Reporte Pluvial", type="primary"):
-            if report_date is None:
+    # LÓGICA PARA DETERMINAR LA FECHA CORRECTAMENTE
+    if report_option == 'Solo Estaciones SAPAL':
+        report_date = datetime.now()
+        st.success(f"El reporte se generará con datos para el acumulado anual hasta hoy: **{report_date.strftime('%d de %B de %Y')}**")
+    else:  # Esto cubre la opción 'SAPAL + CONAGUA'
+        with st.spinner("Buscando la última fecha disponible en CONAGUA..."):
+            latest_conagua_date = get_latest_conagua_date(locations_conagua)
+
+        if latest_conagua_date:
+            report_date = latest_conagua_date
+            st.success(f"¡Listo! El reporte se generará con la fecha más reciente disponible en CONAGUA: **{report_date.strftime('%d de %B de %Y')}**")
+        else:
+            # Plan B si CONAGUA falla
+            report_date = datetime.now()
+            st.warning(
+                "⚠️ **No se pudo contactar a los servidores de CONAGUA para obtener la fecha más reciente.**"
+                "\n\nSe usará la fecha de hoy como referencia. Los datos de CONAGUA podrían no estar actualizados."
+            )
+            st.info(f"El reporte se generará con fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
+
+    # EL BOTÓN AHORA ESTÁ FUERA DEL IF/ELSE Y SIEMPRE SE MOSTRARÁ
+    if st.button("🚀 Generar Reporte Pluvial", type="primary"):
+        if report_date is None:
+            st.error("No se pudo determinar una fecha para el reporte.")
+            st.stop()
+        else:
+            log_expander = st.expander("Ver progreso de la extracción en tiempo real...", expanded=True)
+            log_container = log_expander.empty()
+            log_messages = ["Iniciando proceso..."]
+            log_container.markdown("\n\n".join(log_messages))
+
+            report_date_pd = pd.to_datetime(report_date.date())
+            start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
+
+            with st.spinner('Extrayendo y procesando datos... Esto puede tardar varios minutos.'):
+                # El resto del código de procesamiento sigue aquí sin cambios...
+                total_df = pd.DataFrame()
+                sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, log_messages, log_container)
+                if "CONAGUA" in report_option:
+                    conagua_df = fetch_conagua_data(locations_conagua, start_of_year, report_date_pd, log_messages, log_container)
+                    total_df = pd.concat([sapal_df, conagua_df], ignore_index=True)
+                else:
+                    total_df = sapal_df
+                # ... hasta el final del script
                 st.error("No se pudo determinar una fecha para el reporte.")
                 st.stop()
             else:
@@ -856,6 +875,7 @@ else:
         
 
                     st.rerun()
+
 
 
 
