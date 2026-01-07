@@ -582,30 +582,65 @@ else:
         
         # Lógica para mostrar la fecha y el botón
         if st.session_state.processing_state == 'idle':
-            report_date = None
-            if report_option == 'Solo Estaciones SAPAL':
-                report_date = datetime.now()
-                st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
-            else:
-                with st.spinner("Buscando la última fecha de CONAGUA..."): latest_conagua_date = get_latest_conagua_date(locations_conagua)
-                if latest_conagua_date:
-                    report_date = latest_conagua_date
-                    st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
-                else:
-                    report_date = datetime.now()
-                    st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
-                    st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
+         # --- INSERTAR ESTE BLOQUE DENTRO DEL ELSE (VISTA DE CONFIGURACIÓN) ---
+         use_manual_date = st.checkbox(
+             "Usar fecha específica (día/mes/año)",
+             value=False,
+             disabled=(st.session_state.processing_state == 'processing'),
+             key="use_manual_date"
+         )
+         
+         if use_manual_date:
+             c1, c2, c3 = st.columns(3)
+         
+             with c1:
+                 day = st.number_input(
+                     "Día", min_value=1, max_value=31, value=datetime.now().day, step=1,
+                     disabled=(st.session_state.processing_state == 'processing'),
+                     key="manual_day"
+                 )
+             with c2:
+                 month = st.number_input(
+                     "Mes", min_value=1, max_value=12, value=datetime.now().month, step=1,
+                     disabled=(st.session_state.processing_state == 'processing'),
+                     key="manual_month"
+                 )
+             with c3:
+                 year = st.number_input(
+                     "Año", min_value=2000, max_value=datetime.now().year, value=datetime.now().year, step=1,
+                     disabled=(st.session_state.processing_state == 'processing'),
+                     key="manual_year"
+                 )
+         
+             # Construcción robusta de fecha (evita 31/02, etc.)
+             try:
+                 manual_report_date = datetime(int(year), int(month), int(day))
+                 st.info(f"Se usará la fecha seleccionada: **{manual_report_date.strftime('%d de %B de %Y')}**")
+             except ValueError:
+                 manual_report_date = None
+                 st.error("Fecha inválida. Revise día/mes/año (ej. 31/04 no existe).")
+         else:
+             manual_report_date = None
 
-            if st.button(" Generar Reporte Pluvial", type="primary", use_container_width=True):
-                if report_date:
-                    st.session_state.processing_state = 'processing'
-                    st.session_state.progress_percent = 0
-                    st.session_state.report_date_to_process = report_date
-                    st.session_state.report_option_to_process = report_option
-                    st.session_state.log_messages = ["Iniciando proceso..."] # Inicializa el log aquí
-                    st.rerun()
-                else:
-                    st.error("No se pudo determinar una fecha para el reporte.")
+             report_date = None
+             
+             if st.session_state.get("use_manual_date", False):
+                 report_date = manual_report_date  # datetime o None si inválida
+             else:
+                 if report_option == 'Solo Estaciones SAPAL':
+                     report_date = datetime.now()
+                     st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
+                 else:
+                     with st.spinner("Buscando la última fecha de CONAGUA..."):
+                         latest_conagua_date = get_latest_conagua_date(locations_conagua)
+                     if latest_conagua_date:
+                         report_date = latest_conagua_date
+                         st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
+                     else:
+                         report_date = datetime.now()
+                         st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
+                         st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
+
         else: # Si está procesando, muestra el log
             log_expander = st.expander("Ver progreso detallado...", expanded=True)
             log_expander.markdown("\n\n".join(st.session_state.log_messages))
@@ -819,6 +854,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
