@@ -641,6 +641,37 @@ else:
                          st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
                          st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
 
+         can_run = (report_date is not None)  # si fecha manual inválida => None => bloquea
+         
+         if not can_run:
+             st.warning("Defina una fecha válida para continuar.")
+         else:
+             st.info(f"Fecha de corte seleccionada: {pd.to_datetime(report_date).strftime('%d-%m-%Y')}")
+         
+         if st.button(
+             "Generar reporte",
+             type="primary",
+             use_container_width=True,
+             disabled=(st.session_state.processing_state == 'processing' or not can_run)
+         ):
+             # Estado de ejecución
+             st.session_state.processing_state = 'processing'
+             st.session_state.progress_percent = 0
+         
+             # Persistir parámetros para las etapas
+             st.session_state.report_option_to_process = report_option
+             st.session_state.report_date_to_process = pd.to_datetime(report_date)  # Timestamp seguro
+         
+             # Reset de logs y artefactos intermedios
+             st.session_state.log_messages = ["--- Iniciando procesamiento ---"]
+             for k in ["sapal_df_processed", "total_df_processed", "stations_filtered_gdf",
+                       "outliers_df", "interpolation_results", "metrics_df", "total_df_con_na"]:
+                 if k in st.session_state:
+                     del st.session_state[k]
+         
+             st.rerun()
+
+
         else: # Si está procesando, muestra el log
             log_expander = st.expander("Ver progreso detallado...", expanded=True)
             log_expander.markdown("\n\n".join(st.session_state.log_messages))
@@ -854,6 +885,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
