@@ -582,10 +582,17 @@ else:
         
         # Lógica para mostrar la fecha y el botón
         if st.session_state.processing_state == 'idle':
-         # --- INSERTAR ESTE BLOQUE DENTRO DEL ELSE (VISTA DE CONFIGURACIÓN) ---
+                  # --- INSERTAR ESTE BLOQUE DENTRO DEL ELSE (VISTA DE CONFIGURACIÓN) ---
+                 # --- FECHA + BOTÓN (BLOQUE ÚNICO, SIN NameError) ---
+         
+         # 0) Siempre inicialice
+         report_date = None
+         manual_report_date = None
+         
+         # 1) Selector de fecha manual
          use_manual_date = st.checkbox(
              "Usar fecha específica (día/mes/año)",
-             value=False,
+             value=st.session_state.get("use_manual_date", False),
              disabled=(st.session_state.processing_state == 'processing'),
              key="use_manual_date"
          )
@@ -595,58 +602,53 @@ else:
          
              with c1:
                  day = st.number_input(
-                     "Día", min_value=1, max_value=31, value=datetime.now().day, step=1,
+                     "Día", min_value=1, max_value=31,
+                     value=int(st.session_state.get("manual_day", datetime.now().day)),
+                     step=1, key="manual_day",
                      disabled=(st.session_state.processing_state == 'processing'),
-                     key="manual_day"
                  )
              with c2:
                  month = st.number_input(
-                     "Mes", min_value=1, max_value=12, value=datetime.now().month, step=1,
+                     "Mes", min_value=1, max_value=12,
+                     value=int(st.session_state.get("manual_month", datetime.now().month)),
+                     step=1, key="manual_month",
                      disabled=(st.session_state.processing_state == 'processing'),
-                     key="manual_month"
                  )
              with c3:
                  year = st.number_input(
-                     "Año", min_value=2000, max_value=datetime.now().year, value=datetime.now().year, step=1,
+                     "Año", min_value=2000, max_value=datetime.now().year,
+                     value=int(st.session_state.get("manual_year", datetime.now().year)),
+                     step=1, key="manual_year",
                      disabled=(st.session_state.processing_state == 'processing'),
-                     key="manual_year"
                  )
          
-             # Construcción robusta de fecha (evita 31/02, etc.)
              try:
                  manual_report_date = datetime(int(year), int(month), int(day))
-                 st.info(f"Se usará la fecha seleccionada: **{manual_report_date.strftime('%d de %B de %Y')}**")
+                 report_date = manual_report_date
+                 st.info(f"Se usará la fecha seleccionada: {manual_report_date.strftime('%d-%m-%Y')}")
              except ValueError:
-                 manual_report_date = None
+                 report_date = None
                  st.error("Fecha inválida. Revise día/mes/año (ej. 31/04 no existe).")
-         else:
-             manual_report_date = None
-
-             report_date = None
-             
-             if st.session_state.get("use_manual_date", False):
-                 report_date = manual_report_date  # datetime o None si inválida
-             else:
-                 if report_option == 'Solo Estaciones SAPAL':
-                     report_date = datetime.now()
-                     st.info(f"Se usará la fecha de hoy: **{report_date.strftime('%d de %B de %Y')}**")
-                 else:
-                     with st.spinner("Buscando la última fecha de CONAGUA..."):
-                         latest_conagua_date = get_latest_conagua_date(locations_conagua)
-                     if latest_conagua_date:
-                         report_date = latest_conagua_date
-                         st.info(f"Fecha más reciente encontrada: **{report_date.strftime('%d de %B de %Y')}**")
-                     else:
-                         report_date = datetime.now()
-                         st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
-                         st.info(f"Fecha de corte: **{report_date.strftime('%d de %B de %Y')}**")
-
-         can_run = (report_date is not None)  # si fecha manual inválida => None => bloquea
          
-         if not can_run:
-             st.warning("Defina una fecha válida para continuar.")
          else:
-             st.info(f"Fecha de corte seleccionada: {pd.to_datetime(report_date).strftime('%d-%m-%Y')}")
+             # 2) Fecha automática (SAPAL hoy / CONAGUA última)
+             if report_option == 'Solo Estaciones SAPAL':
+                 report_date = datetime.now()
+                 st.info(f"Se usará la fecha de hoy: {report_date.strftime('%d-%m-%Y')}")
+             else:
+                 with st.spinner("Buscando la última fecha de CONAGUA..."):
+                     latest_conagua_date = get_latest_conagua_date(locations_conagua)
+         
+                 if latest_conagua_date:
+                     report_date = pd.to_datetime(latest_conagua_date).to_pydatetime()
+                     st.info(f"Fecha más reciente encontrada: {report_date.strftime('%d-%m-%Y')}")
+                 else:
+                     report_date = datetime.now()
+                     st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
+                     st.info(f"Fecha de corte: {report_date.strftime('%d-%m-%Y')}")
+         
+         # 3) Botón para disparar pipeline
+         can_run = (report_date is not None)
          
          if st.button(
              "Generar reporte",
@@ -654,22 +656,19 @@ else:
              use_container_width=True,
              disabled=(st.session_state.processing_state == 'processing' or not can_run)
          ):
-             # Estado de ejecución
              st.session_state.processing_state = 'processing'
              st.session_state.progress_percent = 0
-         
-             # Persistir parámetros para las etapas
              st.session_state.report_option_to_process = report_option
-             st.session_state.report_date_to_process = pd.to_datetime(report_date)  # Timestamp seguro
-         
-             # Reset de logs y artefactos intermedios
+             st.session_state.report_date_to_process = pd.to_datetime(report_date)
              st.session_state.log_messages = ["--- Iniciando procesamiento ---"]
+         
              for k in ["sapal_df_processed", "total_df_processed", "stations_filtered_gdf",
                        "outliers_df", "interpolation_results", "metrics_df", "total_df_con_na"]:
                  if k in st.session_state:
                      del st.session_state[k]
          
              st.rerun()
+
 
 
         else: # Si está procesando, muestra el log
@@ -885,6 +884,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
