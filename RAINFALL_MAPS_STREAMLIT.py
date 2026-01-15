@@ -495,25 +495,31 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
     
 @st.cache_resource
 def load_geodata():
-    shapefile_path = "shapefiles" # Ajusta según tu carpeta
+    shapefile_path = "shapefiles"
     try:
+        # Asegúrate de que TODAS estas líneas existan dentro del diccionario data
         data = {
             "boundary": gpd.read_file(os.path.join(shapefile_path, "LIMITE.shp")),
             "stations": gpd.read_file(os.path.join(shapefile_path, "ESTACIONES_actualizado.shp")),
             "hillshade": rasterio.open(os.path.join(shapefile_path, "HILLSHADE_LEON.tif")),
-            # ... el resto de tus capas ...
+            "urban": gpd.read_file(os.path.join(shapefile_path, "LIMITE_URBANO.shp")),
+            "cuenca": gpd.read_file(os.path.join(shapefile_path, "CUENCA_PALOTE.shp")), # <-- ESTA ES LA QUE FALTABA
+            "presa": gpd.read_file(os.path.join(shapefile_path, "EL PALOTE.shp")),
+            "streams": gpd.read_file(os.path.join(shapefile_path, "CORRIENTES_LEON_012025.shp"))
         }
-        # CARGA DE LOGOS
+        
+        # CARGA DE LOGOS (AZUL Y BLANCO)
         try:
             data["logo_azul"] = mpimg.imread(os.path.join(shapefile_path, "logo_sapal_azul.png"))
             data["logo_blanco"] = mpimg.imread(os.path.join(shapefile_path, "logo_sapal_blanco.png"))
-        except:
+        except Exception as e_logo:
             data["logo_azul"] = None
             data["logo_blanco"] = None
-            st.error("No se encontraron los archivos de logo_sapal_azul.png o blanco.")
+            st.warning(f"Advertencia: No se pudieron cargar los logos: {e_logo}")
+            
         return data
     except Exception as e:
-        st.error(f"Error fatal: {e}")
+        st.error(f"Error fatal al cargar archivos geoespaciales: {e}")
         st.stop()
 
 geodata = load_geodata()
@@ -1117,6 +1123,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
