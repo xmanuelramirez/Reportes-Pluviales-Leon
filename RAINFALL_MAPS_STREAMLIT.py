@@ -804,24 +804,26 @@ else:
             df_hist[label_media] = df_hist.apply(calc_media_real, axis=1)
             df_hist.to_excel(EXCEL_PATH, index=False)
 
-            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (800px) ---
+            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (MODO DARK / DEGRADADO HORIZONTAL) ---
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
             
-            # --- BARRAS CON COLOR POR ALTURA ---
+            # --- BARRAS CON DEGRADADO HORIZONTAL Y TRANSPARENCIA ---
+            # De izquierda (Enero: muy transparente y claro) a derecha (Diciembre: más opaco y oscuro)
+            colors_bars = [f'rgba(0, 176, 255, {0.15 + (i * 0.06)})' for i in range(12)]
+            
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
                 x=meses_labels, y=y_actual_acum, 
                 name=f"Acumulado {ano_act}",
                 marker=dict(
-                    color=y_actual_acum,
-                    colorscale=[[0, '#001A33'], [1, '#00BFFF']], # Contraste fuerte para simular profundidad
-                    line=dict(color='white', width=0.5)
+                    color=colors_bars, # Aplicar lista de colores para degradado horizontal
+                    line=dict(color='rgba(255,255,255,0.2)', width=0.5)
                 ),
                 hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            # Configuración de Curvas (Sin Azul)
+            # Configuración de Curvas (Neón)
             configs = [
                 {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
                 {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
@@ -833,7 +835,6 @@ else:
                 if lc['c'] in df_hist.columns:
                     y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
                     
-                    # Definir si está terminado (12 meses) o no
                     is_current = (lc['c'] == str(ano_act))
                     limit = mes_idx + 1 if is_current else 12
                     
@@ -858,39 +859,39 @@ else:
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
                     
-                    # 3. CALLOUTS CON LÓGICA DE ORIENTACIÓN
-                    # Si es el año actual (incompleto) -> Línea Vertical (Hacia arriba)
-                    # Si es año pasado (completo) -> Línea Horizontal (Hacia la derecha)
-                    
+                    # 3. CALLOUTS DINÁMICOS (VERTICAL PARA ACTUAL / HORIZONTAL CON GAP PARA TERMINADOS)
                     if is_current:
-                        # VERTICAL (Hacia arriba)
-                        c_x = [last_x, last_x]
-                        c_y = [last_y, last_y + 60]
-                        c_pos = "top center"
+                        # VERTICAL: Línea blanca hacia arriba
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x, last_x], y=[last_y, last_y + 60],
+                            mode='lines+text',
+                            text=["", f"<b>{last_y:.1f}</b>"],
+                            textposition="top center",
+                            textfont=dict(color='white', size=13),
+                            line=dict(color='white', width=1.2),
+                            showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                        ))
                     else:
-                        # HORIZONTAL (Hacia la derecha)
-                        # Usamos un pequeño truco de desplazamiento en X
-                        c_x = [last_x, last_x] # Plotly maneja el texto mejor con offset en 'textposition'
-                        c_y = [last_y, last_y]
-                        c_pos = "middle right"
-
-                    fig_p.add_trace(go.Scatter(
-                        x=c_x, y=c_y,
-                        mode='lines+text' if is_current else 'markers+text',
-                        text=["", f"<b>{last_y:.1f}</b>"] if is_current else [f"<b>{last_y:.1f}</b>"],
-                        textposition=c_pos,
-                        textfont=dict(color='white', size=13),
-                        line=dict(color='white', width=1) if is_current else None,
-                        marker=dict(opacity=0) if not is_current else None,
-                        showlegend=False,
-                        legendgroup=lc['name'],
-                        hoverinfo='skip'
-                    ))
+                        # HORIZONTAL: Fuera de las barras hacia la derecha (GAP)
+                        # Usamos anotaciones para tener control total del "offset" en píxeles
+                        fig_p.add_annotation(
+                            x=last_x, y=last_y,
+                            text=f"<b>{last_y:.1f}</b>",
+                            showarrow=False,
+                            xanchor="left",
+                            xshift=15, # Este es el GAP (espacio) hacia la derecha
+                            font=dict(color=lc['color'], size=12), # Color de la curva para identificarlo
+                            bgcolor="rgba(0,0,0,0)",
+                            legendgroup=lc['name'] # Nota: annotations no soportan legendgroup nativo en algunas versiones, 
+                                                 # pero el texto se oculta si el eje es coherente.
+                        )
 
             # --- DISEÑO DE LAYOUT ---
             fig_p.update_layout(
-                height=800, margin=dict(b=120, l=10, r=80, t=10), # Más margen a la derecha para callouts horizontales
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                height=800, 
+                margin=dict(b=120, l=10, r=100, t=10), # Margen derecho amplio (100) para los callouts
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(
                     tickangle=-45, showgrid=False, 
                     tickfont=dict(family="Arial Black", size=10, color="white"),
@@ -1145,6 +1146,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
