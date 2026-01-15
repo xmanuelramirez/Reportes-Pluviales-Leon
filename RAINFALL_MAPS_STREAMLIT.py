@@ -804,13 +804,19 @@ else:
             df_hist[label_media] = df_hist.apply(calc_media_real, axis=1)
             df_hist.to_excel(EXCEL_PATH, index=False)
 
-            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (MODO DARK / DEGRADADO HORIZONTAL) ---
+
+            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (MODO DARK / DEGRADADO Y CALLOUTS PRO) ---
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
             
-            # --- BARRAS CON DEGRADADO HORIZONTAL Y TRANSPARENCIA ---
-            # Izquierda (Enero) muy claro/transparente -> Derecha (Diciembre) azul sólido
-            colors_bars = [f'rgba(0, 112, 255, {0.2 + (i * 0.06)})' for i in range(12)]
+            # --- BARRAS CON DEGRADADO HORIZONTAL MARCADO (CLARO A OSCURO + TRANSPARENCIA) ---
+            # Escala de azules: Desde Cian claro transparente hasta Azul Medianoche casi sólido
+            colors_bars = [
+                'rgba(173, 216, 230, 0.2)', 'rgba(135, 206, 250, 0.3)', 'rgba(0, 191, 255, 0.4)',
+                'rgba(30, 144, 255, 0.5)', 'rgba(0, 123, 255, 0.6)', 'rgba(0, 105, 217, 0.7)',
+                'rgba(0, 86, 179, 0.75)', 'rgba(0, 68, 140, 0.8)', 'rgba(0, 51, 102, 0.85)',
+                'rgba(0, 38, 77, 0.9)', 'rgba(0, 26, 51, 0.95)', 'rgba(0, 13, 26, 1.0)'
+            ]
             
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
@@ -818,12 +824,12 @@ else:
                 name=f"Acumulado {ano_act}",
                 marker=dict(
                     color=colors_bars, 
-                    line=dict(color='rgba(255,255,255,0.2)', width=0.5)
+                    line=dict(color='rgba(255,255,255,0.3)', width=1)
                 ),
                 hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            # Configuración de Curvas (Neón - Sin Azul)
+            # Configuración de Curvas (Neón - Cero Azul)
             configs = [
                 {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
                 {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
@@ -833,7 +839,6 @@ else:
 
             for i, lc in enumerate(configs):
                 if lc['c'] in df_hist.columns:
-                    # Cálculo de acumulado
                     y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
                     
                     is_current = (lc['c'] == str(ano_act))
@@ -856,45 +861,50 @@ else:
                         legendgroup=lc['name'],
                         line=dict(color=lc['color'], width=3, shape='spline', smoothing=1.3, 
                                   dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
-                        marker=dict(size=9, symbol=lc['sym'], line=dict(color='white', width=1.5)),
+                        marker=dict(size=10, symbol=lc['sym'], line=dict(color='white', width=1.5)),
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
                     
-                    # 3. CALLOUTS DINÁMICOS (TOGGLE CON LEYENDA)
+                    # 3. CALLOUTS CON LÍNEAS DE REFERENCIA (LÍNEAS BLANCAS)
                     if is_current:
-                        # VERTICAL (Año en curso): Línea blanca hacia arriba
+                        # VERTICAL (Año en curso): Línea hacia arriba
                         fig_p.add_trace(go.Scatter(
-                            x=[last_x, last_x], y=[last_y, last_y + 50],
+                            x=[last_x, last_x], y=[last_y, last_y + 60],
                             mode='lines+text',
                             text=["", f"<b>{last_y:.1f}</b>"],
                             textposition="top center",
-                            textfont=dict(color='white', size=13),
-                            line=dict(color='white', width=1.2),
+                            textfont=dict(color='white', size=14),
+                            line=dict(color='white', width=1.5),
                             showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
                         ))
                     else:
-                        # HORIZONTAL (Años terminados): Fuera de las barras a la derecha
+                        # HORIZONTAL (Años terminados): Línea hacia la derecha fuera de las barras
+                        # Desplazamos los textos verticalmente un poco entre ellos para que no se encimen
+                        y_offset = last_y + (i * 5) 
+                        
                         fig_p.add_trace(go.Scatter(
-                            x=[last_x], y=[last_y],
+                            x=[last_x, last_x], 
+                            y=[y_offset, y_offset],
                             mode='markers+text',
-                            # Agregamos espacios en blanco antes del número para crear el "GAP" visual
-                            text=[f"    <b>{last_y:.1f}</b>"], 
+                            # Usamos espacios y un guion largo para simular la línea horizontal
+                            text=[f"  —  <b>{last_y:.1f}</b>  "],
                             textposition="middle right",
-                            textfont=dict(color=lc['color'], size=13),
-                            marker=dict(opacity=0), # Punto invisible para no manchar la curva
+                            textfont=dict(color='white', size=13),
+                            marker=dict(opacity=0),
                             showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
                         ))
 
             # --- DISEÑO DE LAYOUT ---
             fig_p.update_layout(
                 height=800, 
-                margin=dict(b=120, l=10, r=100, t=10), # Margen derecho para los callouts
+                margin=dict(b=120, l=20, r=150, t=20), # Margen derecho extra amplio (150)
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(
                     tickangle=-45, showgrid=False, 
                     tickfont=dict(family="Arial Black", size=10, color="white"),
-                    showline=True, linecolor='white'
+                    showline=True, linecolor='white',
+                    range=[-0.5, 12.5] # Extendemos el rango para que los callouts no se corten
                 ),
                 yaxis=dict(
                     dtick=100, showgrid=True, gridcolor='rgba(255,255,255,0.15)', 
@@ -902,10 +912,11 @@ else:
                 ),
                 legend=dict(
                     orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, 
-                    font=dict(size=11, color="white"), bgcolor="rgba(0,0,0,0.4)"
+                    font=dict(size=12, color="white"), bgcolor="rgba(0,0,0,0.5)"
                 )
             )
             st.session_state.fig_plotly = fig_p
+            
             # --- 4. LÓGICA ESPACIAL ORIGINAL (RESTAURADA) ---
             total_df_con_na = total_df.copy(); st.session_state.total_df_con_na = total_df_con_na
             if total_df.dropna(subset=['P_mm']).empty: st.error("No se encontraron datos válidos."); st.stop()
@@ -1144,6 +1155,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
