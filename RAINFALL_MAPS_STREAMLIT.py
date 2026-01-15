@@ -824,19 +824,52 @@ else:
                     
                     # Callout con Línea (Leader line)
                     val = dy.iloc[-1]
-                    fig_p.add_trace(go.Scatter(
-                        x=[dx[-1], dx[-1]], y=[val, val + 40 + (i*15)], # Escalonado para no traslapar
-                        mode='lines+text', text=["", f"<b>{val:.1f}</b>"], textposition="top center",
-                        line=dict(color='black', width=1), showlegend=False, legendgroup=lc['name']
-                    ))
+                            offset_y = 40 + (i * 15) 
+                            
+                            fig_p.add_trace(go.Scatter(
+                                x=[dx[-1], dx[-1]], 
+                                y=[val, val + offset_y],
+                                mode='lines+text',
+                                text=["", f"<b>{val:.1f}</b>"],
+                                textposition="top center",
+                                textfont=dict(color='white', size=12), # Texto blanco
+                                line=dict(color='rgba(255,255,255,0.7)', width=1), # Línea blanca tenue
+                                showlegend=False,
+                                legendgroup=lc['name'],
+                                hoverinfo='skip'
+                            ))
 
             fig_p.update_layout(
-                height=800, margin=dict(b=100),
-                xaxis=dict(tickangle=-45, showgrid=False, tickfont=dict(family="Arial Black", size=10)),
-                yaxis=dict(dtick=100, showgrid=True, gridcolor='rgba(0,0,0,0.1)', griddash='dash', layer='below traces', showticklabels=False, zeroline=False),
-                plot_bgcolor='white', paper_bgcolor='white',
-                legend=dict(orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, bgcolor="rgba(255,255,255,0.7)")
-            )
+                        height=800, 
+                        margin=dict(b=100, l=5, r=50, t=10),
+                        # FONDO TRANSPARENTE
+                        plot_bgcolor='rgba(0,0,0,0)', 
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        
+                        xaxis=dict(
+                            tickangle=-45, 
+                            showgrid=False, 
+                            tickfont=dict(family="Arial Black", size=10, color="white"), # Meses blancos
+                            showline=True, 
+                            linecolor='white' # Línea de base blanca
+                        ),
+                        yaxis=dict(
+                            dtick=100, 
+                            showgrid=True,
+                            gridcolor='rgba(255,255,255,0.15)', # Líneas horizontales blancas tenues
+                            griddash='dash', 
+                            layer='below traces', 
+                            showticklabels=False, 
+                            zeroline=False
+                        ),
+                        legend=dict(
+                            orientation="v", 
+                            yanchor="top", y=0.98, 
+                            xanchor="left", x=0.02, 
+                            font=dict(size=11, color="white"), # Texto de leyenda blanco
+                            bgcolor="rgba(0,0,0,0.3)" # Fondo de leyenda oscuro sutil
+                        )
+                    )
             st.session_state.fig_plotly = fig_p
 
             # --- 4. LÓGICA ESPACIAL ORIGINAL (RESTAURADA) ---
@@ -1010,6 +1043,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
