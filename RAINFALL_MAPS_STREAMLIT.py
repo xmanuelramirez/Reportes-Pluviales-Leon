@@ -844,7 +844,7 @@ else:
                     ))
 
             fig_p.update_layout(
-                        height=850, 
+                        height=900, 
                         margin=dict(b=100, l=5, r=50, t=10),
                         # FONDO TRANSPARENTE
                         plot_bgcolor='rgba(0,0,0,0)', 
@@ -1026,84 +1026,107 @@ else:
             fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
             png_buffer.seek(0)
             # --- FIN DE TU CÓDIGO DE PLOTEO ORIGINAL ---
+           
 
-
-            # --- 2. TRANSFORMAR EL MAPA A "MODO OSCURO" PARA LA APP ---
-            # Fondo de la figura y del mapa transparentes
+            # --- 2. TRANSFORMAR EL MAPA A "MODO OSCURO" TOTAL PARA LA APP ---
+            # Fondo de la figura y del mapa 100% transparentes
             fig.patch.set_facecolor('none')
+            fig.patch.set_alpha(0.0)
             ax.set_facecolor('none')
+            ax.patch.set_alpha(0.0)
 
-            # Título, Coordenadas y Ejes en Blanco
+            # --- TEXTOS PRINCIPALES ---
+            # Título principal (usamos set_title o textos manuales)
             ax.title.set_color('white')
+            ax.title.set_weight('bold')
+
+            # Coordenadas de los ejes (Números)
             ax.tick_params(axis='both', colors='white', which='both', labelsize=10)
-            
-            # Aplicar color blanco y borde negro a los números de las coordenadas
             for label in ax.get_xticklabels() + ax.get_yticklabels():
                 label.set_color('white')
-                label.set_path_effects([patheffects.withStroke(linewidth=2, foreground='black')])
+                # Sombra negra muy sutil para que resalte sobre el mapa
+                label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='black', alpha=0.5)])
 
-            # Marcos del mapa (Spines) en blanco
+            # --- MARCOS Y GRILLA ---
+            # Cuadro que rodea el mapa (Spines)
             for spine in ax.spines.values():
                 spine.set_edgecolor('white')
                 spine.set_linewidth(1.5)
+                spine.set_visible(True)
 
-            # Grilla (Cuadrícula) en blanco tenue
-            ax.grid(True, linestyle=':', alpha=0.4, color='white')
+            # Grilla (Líneas de coordenadas punteadas)
+            ax.grid(True, linestyle=':', alpha=0.3, color='white', zorder=0)
 
-            # Ajustar Leyenda (Legend)
-            if 'legend_ax' in locals() or 'legend_ax' in globals():
-                legend_ax.get_frame().set_facecolor('none')
-                legend_ax.get_frame().set_edgecolor('white')
-                legend_ax.get_title().set_color('white')
-                for text in legend_ax.get_texts():
-                    text.set_color('white')
+            # --- LEYENDA (SIMBOLOGÍA) ---
+            # Buscamos la leyenda para volverla transparente y blanca
+            leg = ax.get_legend()
+            if leg:
+                leg.get_frame().set_facecolor('none') # Fondo transparente
+                leg.get_frame().set_edgecolor('white') # Borde blanco
+                leg.get_frame().set_linewidth(1)
+                leg.get_title().set_color('white') # Título "SIMBOLOGÍA" en blanco
+                leg.get_title().set_weight('bold')
+                for text in leg.get_texts():
+                    text.set_color('white') # Todos los items en blanco
 
-            # Ajustar Barra de Color (Colorbar)
+            # --- BARRA DE COLOR (COLORBAR) ---
             if 'cb' in locals():
                 cb.ax.yaxis.set_tick_params(color='white', labelcolor='white')
                 cb.ax.title.set_color('white')
+                cb.ax.title.set_weight('bold')
                 cb.outline.set_edgecolor('white')
+                cb.outline.set_linewidth(1)
+                # Cambiar el color de los números de la barra de color
+                plt.setp(plt.getp(cb.ax.axes, 'yticklabels'), color='white')
 
-            # Ajustar textos sueltos (Norte, Escala, etc.)
-            for text_obj in ax.texts:
-                text_obj.set_color('white')
+            # --- TEXTOS FLOTANTES (Norte, Escala, Títulos manuales) ---
+            # Iteramos sobre todos los textos del mapa para asegurar blancura total
+            for t in ax.texts:
+                t.set_color('white')
+                # Si el texto es del Norte o Escala, aseguramos que se vea
+                if t.get_text() in ['N', 'S', 'E', 'W', '0', '2.5', '5 km']:
+                    t.set_weight('bold')
 
-            # Ajustar rectángulos de la escala (Convertir blanco en transparente con borde blanco)
+            # --- ESCALA GRÁFICA (Barras Blanco/Negro) ---
+            # Convertimos lo que era blanco en transparente y lo negro en blanco
             for patch in ax.patches:
                 if isinstance(patch, plt.Rectangle):
-                    # Si el color es blanco (o muy cercano a blanco), lo hacemos transparente
-                    face = patch.get_facecolor()
-                    if face[0] > 0.9 and face[1] > 0.9 and face[2] > 0.9:
+                    # Si el rectángulo es casi blanco, lo hacemos transparente con borde blanco
+                    fc = patch.get_facecolor()
+                    if fc[0] > 0.8: # Es blanco
                         patch.set_facecolor('none')
                         patch.set_edgecolor('white')
+                        patch.set_linewidth(1)
+                    else: # Es negro
+                        patch.set_facecolor('white')
+                        patch.set_edgecolor('white')
 
-            # --- 3. FINALIZACIÓN: GUARDAR EN SESSION STATE ---
+            # --- 3. FINALIZACIÓN Y GUARDADO ---
             st.session_state.figure = fig
             st.session_state.raster_io = raster_io
             st.session_state.png_buffer = png_buffer
             st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
 
-            # Preparar Estadísticas
+            # Preparar Estadísticas (No cambia)
             desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(
                 columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'}
             )
             report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
             
-            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
+            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
             
             st.session_state.stats_panel_md = {
-                "header": stats_md, 
-                "total_df_con_na": total_df_con_na, 
-                "outliers_df": outliers_df, 
-                "desc_stats": desc_stats, 
-                "metrics_df": metrics_df
+                "header": stats_md, "total_df_con_na": total_df_con_na, 
+                "outliers_df": outliers_df, "desc_stats": desc_stats, "metrics_df": metrics_df
             }
             
-            # --- 4. CAMBIO DE VISTA ---
             st.session_state.map_generated = True
             st.session_state.processing_state = 'idle'
             st.session_state.progress_percent = 100
             st.rerun()
+
+
+           
 
             
 
@@ -1117,6 +1140,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
