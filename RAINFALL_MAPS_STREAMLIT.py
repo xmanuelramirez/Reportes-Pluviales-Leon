@@ -566,7 +566,7 @@ if st.session_state.map_generated:
     
     with col_mapa_viz:
         # Mostramos el mapa de Matplotlib
-        st.pyplot(st.session_state.figure, use_container_width=True)
+        st.pyplot(st.session_state.figure, use_container_width=True, transparent = True)
     with col_espacio:
         st.write("")
     with col_curva_viz:
@@ -844,7 +844,7 @@ else:
                     ))
 
             fig_p.update_layout(
-                        height=800, 
+                        height=850, 
                         margin=dict(b=100, l=5, r=50, t=10),
                         # FONDO TRANSPARENTE
                         plot_bgcolor='rgba(0,0,0,0)', 
@@ -1027,17 +1027,87 @@ else:
             png_buffer.seek(0)
             # --- FIN DE TU CÓDIGO DE PLOTEO ORIGINAL ---
 
-            # --- FINALIZACIÓN: GUARDAR TODO Y CAMBIAR DE VISTA ---
-            st.session_state.figure, st.session_state.raster_io, st.session_state.png_buffer, st.session_state.report_date_str = fig, raster_io, png_buffer, report_date_pd.strftime('%Y%m%d')
-            desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'})
-            report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
-            st.session_state.stats_panel_md = {"header": stats_md, "total_df_con_na": total_df_con_na, "outliers_df": outliers_df, "desc_stats": desc_stats, "metrics_df": metrics_df}
+
+            # --- 2. TRANSFORMAR EL MAPA A "MODO OSCURO" PARA LA APP ---
+            # Fondo de la figura y del mapa transparentes
+            fig.patch.set_facecolor('none')
+            ax.set_facecolor('none')
+
+            # Título, Coordenadas y Ejes en Blanco
+            ax.title.set_color('white')
+            ax.tick_params(axis='both', colors='white', which='both', labelsize=10)
             
+            # Aplicar color blanco y borde negro a los números de las coordenadas
+            for label in ax.get_xticklabels() + ax.get_yticklabels():
+                label.set_color('white')
+                label.set_path_effects([patheffects.withStroke(linewidth=2, foreground='black')])
+
+            # Marcos del mapa (Spines) en blanco
+            for spine in ax.spines.values():
+                spine.set_edgecolor('white')
+                spine.set_linewidth(1.5)
+
+            # Grilla (Cuadrícula) en blanco tenue
+            ax.grid(True, linestyle=':', alpha=0.4, color='white')
+
+            # Ajustar Leyenda (Legend)
+            if 'legend_ax' in locals() or 'legend_ax' in globals():
+                legend_ax.get_frame().set_facecolor('none')
+                legend_ax.get_frame().set_edgecolor('white')
+                legend_ax.get_title().set_color('white')
+                for text in legend_ax.get_texts():
+                    text.set_color('white')
+
+            # Ajustar Barra de Color (Colorbar)
+            if 'cb' in locals():
+                cb.ax.yaxis.set_tick_params(color='white', labelcolor='white')
+                cb.ax.title.set_color('white')
+                cb.outline.set_edgecolor('white')
+
+            # Ajustar textos sueltos (Norte, Escala, etc.)
+            for text_obj in ax.texts:
+                text_obj.set_color('white')
+
+            # Ajustar rectángulos de la escala (Convertir blanco en transparente con borde blanco)
+            for patch in ax.patches:
+                if isinstance(patch, plt.Rectangle):
+                    # Si el color es blanco (o muy cercano a blanco), lo hacemos transparente
+                    face = patch.get_facecolor()
+                    if face[0] > 0.9 and face[1] > 0.9 and face[2] > 0.9:
+                        patch.set_facecolor('none')
+                        patch.set_edgecolor('white')
+
+            # --- 3. FINALIZACIÓN: GUARDAR EN SESSION STATE ---
+            st.session_state.figure = fig
+            st.session_state.raster_io = raster_io
+            st.session_state.png_buffer = png_buffer
+            st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
+
+            # Preparar Estadísticas
+            desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(
+                columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'}
+            )
+            report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
+            
+            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método Interpolación:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
+            
+            st.session_state.stats_panel_md = {
+                "header": stats_md, 
+                "total_df_con_na": total_df_con_na, 
+                "outliers_df": outliers_df, 
+                "desc_stats": desc_stats, 
+                "metrics_df": metrics_df
+            }
+            
+            # --- 4. CAMBIO DE VISTA ---
             st.session_state.map_generated = True
             st.session_state.processing_state = 'idle'
             st.session_state.progress_percent = 100
             st.rerun()
+
+            
+
+            
 
     with col_mapa:
         # --- NUEVO PLACEHOLDER CON SPINNER PERSONALIZADO ---
@@ -1047,6 +1117,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
