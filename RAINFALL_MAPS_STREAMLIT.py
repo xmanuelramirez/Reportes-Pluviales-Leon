@@ -896,7 +896,7 @@ else:
 
             # --- DISEÑO DE LAYOUT ---
             fig_p.update_layout(
-                height=800, 
+                height=870, 
                 margin=dict(b=120, l=20, r=150, t=20), # Margen derecho extra amplio (150)
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
@@ -1057,7 +1057,7 @@ else:
             # --- PREPARACIÓN DE POSICIÓN DEL LOGO ---
             if geodata["logo_azul"] is not None:
                 aspect_ratio = geodata["logo_azul"].shape[0] / geodata["logo_azul"].shape[1]
-                logo_w = total_width * 0.12
+                logo_w = total_width * 0.15
                 logo_h = logo_w * aspect_ratio
                 l_x = total_maxx - (total_width * 0.03) - logo_w
                 l_y = total_miny + (total_height * 0.03)
@@ -1155,6 +1155,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
