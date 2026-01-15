@@ -6,6 +6,7 @@ Versión 12.0 - Versión final estable con lógica de SAPAL de R, CONAGUA en par
 """
 
 # --- LIBRERÍAS PRINCIPALES ---
+from matplotlib import patheffects
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
@@ -1140,6 +1141,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
