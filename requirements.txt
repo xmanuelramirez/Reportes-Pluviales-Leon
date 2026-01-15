@@ -10,4 +10,7 @@ pykrige==1.7.0
 scikit-learn==1.4.2
 urllib3<2.0
 selenium==4.21.0
+plotly==5.22.0
+openpyxl==3.1.2
+
 
