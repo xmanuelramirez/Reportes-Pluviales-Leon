@@ -1067,8 +1067,8 @@ else:
                 for text in leg.get_texts():
                     text.set_color('white') # Letras de la leyenda blancas
                 leg.get_title().set_color('white') # Título "SIMBOLOGÍA" blanco
-                            for text in leg.get_texts():
-                                text.set_color('white') # Todos los items en blanco
+                for text in leg.get_texts():
+                    text.set_color('white') # Todos los items en blanco
 
             # --- BARRA DE COLOR (COLORBAR) ---
             if 'cb' in locals():
@@ -1141,6 +1141,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
