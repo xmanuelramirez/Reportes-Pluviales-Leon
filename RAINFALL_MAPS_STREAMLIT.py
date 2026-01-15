@@ -808,19 +808,28 @@ else:
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
             
+            # --- BARRAS AZULES CON DEGRADADO VERTICAL (Dependiente del valor Y) ---
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
-                x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}",
-                marker=dict(color=y_actual_acum, colorscale=[[0, '#D1E9FF'], [1, '#0070FF']], showscale=False)
+                x=meses_labels, 
+                y=y_actual_acum, 
+                name=f"Acumulado {ano_act}",
+                marker=dict(
+                    color=y_actual_acum, # Mapeo de color a la altura (Y) para degradado vertical
+                    colorscale=[[0, '#003366'], [1, '#0070FF']], # De azul oscuro (base) a azul brillante (punta)
+                    showscale=False,
+                    line=dict(color='rgba(255,255,255,0.2)', width=0.5)
+                ),
+                hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            # --- CONFIGURACIÓN DE CURVAS (Incluye 2024 y previos) ---
-            # Definimos colores neón que resaltan en fondo negro
+            # --- CONFIGURACIÓN DE CURVAS (Colores Neón - Sin Azul en curvas) ---
+            # Año Actual: Amarillo Neón | Año-1: Verde Neón | Año-2: Rosa Neón | Media: Naranja Neón
             configs = [
-                {'c': str(ano_act), 'color': '#0070FF', 'shadow': '#00264D', 'name': f'CURVA {ano_act}', 'sym': 'circle'},
-                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'},
-                {'c': str(ano_act-2), 'color': '#FF00FF', 'shadow': '#4D004D', 'name': str(ano_act-2), 'sym': 'diamond'},
-                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'}
+                {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
+                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
+                {'c': str(ano_act-2), 'color': '#FF00FF', 'shadow': '#4D004D', 'name': str(ano_act-2), 'sym': 'diamond'}, 
+                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'} 
             ]
 
             for i, lc in enumerate(configs):
@@ -829,60 +838,70 @@ else:
                     lim = mes_idx + 1 if lc['c'] == str(ano_act) else 12
                     dx, dy = meses_labels[:lim], y_v[:lim]
 
-                    # Sombra y Curva agrupadas
-                    fig_p.add_trace(go.Scatter(x=dx, y=dy, mode='lines', line=dict(color=lc['shadow'], width=4, shape='spline'), opacity=0.3, showlegend=False, legendgroup=lc['name']))
-                    fig_p.add_trace(go.Scatter(x=dx, y=dy, mode='lines+markers', name=lc['name'], legendgroup=lc['name'], 
-                                             line=dict(color=lc['color'], width=3, shape='spline', dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
-                                             marker=dict(size=9, symbol=lc['sym'], line=dict(color='white', width=1.5))))
+                    # 1. SOMBRA OSCURA (AGRUPADA)
+                    fig_p.add_trace(go.Scatter(
+                        x=dx, y=dy, mode='lines',
+                        line=dict(color=lc['shadow'], width=5, shape='spline', smoothing=1.3),
+                        opacity=0.4, hoverinfo='skip', showlegend=False, legendgroup=lc['name']
+                    ))
+
+                    # 2. CURVA PRINCIPAL (MARCADORES DIFERENTES)
+                    fig_p.add_trace(go.Scatter(
+                        x=dx, y=dy, mode='lines+markers', name=lc['name'],
+                        legendgroup=lc['name'],
+                        line=dict(color=lc['color'], width=3, shape='spline', smoothing=1.3, 
+                                  dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
+                        marker=dict(size=9, symbol=lc['sym'], line=dict(color='white', width=1.5)),
+                        hovertemplate='%{y:.1f} mm<extra></extra>'
+                    ))
                     
-                    # Callout con Línea (Leader line)
+                    # 3. CALLOUT CON LÍNEA NEGRA (Leader line)
                     val = dy.iloc[-1]
-                    offset_y = 40 + (i * 15) 
-                            
+                    offset_y = 50 + (i * 20) # Separación para que no choquen
+                    
                     fig_p.add_trace(go.Scatter(
                         x=[dx[-1], dx[-1]], 
                         y=[val, val + offset_y],
                         mode='lines+text',
                         text=["", f"<b>{val:.1f}</b>"],
                         textposition="top center",
-                        textfont=dict(color='white', size=12),
-                        line=dict(color='rgba(255,255,255,0.7)', width=1),
+                        textfont=dict(color='white', size=13),
+                        line=dict(color='white', width=1.2), # Línea blanca para resaltar en fondo negro
                         showlegend=False,
                         legendgroup=lc['name'],
                         hoverinfo='skip'
                     ))
 
+            # --- DISEÑO DE LAYOUT (MODO OSCURO / TRANSPARENTE) ---
             fig_p.update_layout(
-                        height=870, 
-                        margin=dict(b=100, l=5, r=50, t=10),
-                        # FONDO TRANSPARENTE
-                        plot_bgcolor='rgba(0,0,0,0)', 
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        
-                        xaxis=dict(
-                            tickangle=-45, 
-                            showgrid=False, 
-                            tickfont=dict(family="Arial Black", size=10, color="white"), # Meses blancos
-                            showline=True, 
-                            linecolor='white' # Línea de base blanca
-                        ),
-                        yaxis=dict(
-                            dtick=100, 
-                            showgrid=True,
-                            gridcolor='rgba(255,255,255,0.15)', # Líneas horizontales blancas tenues
-                            griddash='dash', 
-                            layer='below traces', 
-                            showticklabels=False, 
-                            zeroline=False
-                        ),
-                        legend=dict(
-                            orientation="v", 
-                            yanchor="top", y=0.98, 
-                            xanchor="left", x=0.02, 
-                            font=dict(size=11, color="white"), # Texto de leyenda blanco
-                            bgcolor="rgba(0,0,0,0.3)" # Fondo de leyenda oscuro sutil
-                        )
-                    )
+                height=800, 
+                margin=dict(b=120, l=5, r=50, t=10),
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(
+                    tickangle=-45, 
+                    showgrid=False, 
+                    tickfont=dict(family="Arial Black", size=10, color="white"),
+                    showline=True, 
+                    linecolor='white'
+                ),
+                yaxis=dict(
+                    dtick=100, 
+                    showgrid=True,
+                    gridcolor='rgba(255,255,255,0.15)', 
+                    griddash='dash', 
+                    layer='below traces', 
+                    showticklabels=False, 
+                    zeroline=False
+                ),
+                legend=dict(
+                    orientation="v", 
+                    yanchor="top", y=0.98, 
+                    xanchor="left", x=0.02, 
+                    font=dict(size=11, color="white"), 
+                    bgcolor="rgba(0,0,0,0.4)"
+                )
+            )
             st.session_state.fig_plotly = fig_p
 
             # --- 4. LÓGICA ESPACIAL ORIGINAL (RESTAURADA) ---
@@ -1123,6 +1142,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
