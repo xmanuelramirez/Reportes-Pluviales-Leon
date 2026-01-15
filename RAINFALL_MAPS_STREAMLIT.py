@@ -562,12 +562,13 @@ if st.session_state.map_generated:
                                f"Curvas_{st.session_state.report_date_str}.html", "text/html", use_container_width=True)
 
     # --- 2. FILA PRINCIPAL: MAPA Y GRÁFICA LADO A LADO ---
-    col_mapa_viz, col_curva_viz = st.columns([1.3, 1]) # Proporción para que el mapa luzca grande
+    col_mapa_viz, col_espacio, col_curva_viz = st.columns([1.3, 0.1,1]) # Proporción para que el mapa luzca grande
     
     with col_mapa_viz:
         # Mostramos el mapa de Matplotlib
         st.pyplot(st.session_state.figure, use_container_width=True)
-    
+    with col_espacio:
+        st.write("")
     with col_curva_viz:
         # Mostramos la gráfica interactiva de Plotly
         if 'fig_plotly' in st.session_state:
@@ -804,10 +805,13 @@ else:
                 marker=dict(color=y_actual_acum, colorscale=[[0, '#D1E9FF'], [1, '#0070FF']], showscale=False)
             ))
 
+            # --- CONFIGURACIÓN DE CURVAS (Incluye 2024 y previos) ---
+            # Definimos colores neón que resaltan en fondo negro
             configs = [
-                {'c': str(ano_act), 'color': '#0070FF', 'shadow': '#00264D', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
-                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
-                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'} 
+                {'c': str(ano_act), 'color': '#0070FF', 'shadow': '#00264D', 'name': f'CURVA {ano_act}', 'sym': 'circle'},
+                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'},
+                {'c': str(ano_act-2), 'color': '#FF00FF', 'shadow': '#4D004D', 'name': str(ano_act-2), 'sym': 'diamond'},
+                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'}
             ]
 
             for i, lc in enumerate(configs):
@@ -1043,6 +1047,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
