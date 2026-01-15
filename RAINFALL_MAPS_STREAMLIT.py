@@ -69,6 +69,8 @@ from sklearn.model_selection import LeaveOneOut
 from rasterio.transform import from_origin
 
 from rasterio.plot import show
+# Agrégalo cerca de donde cargas los shapefiles
+EXCEL_PATH = os.path.join("shapefiles", "GRÁFICA.xlsx")
 warnings.simplefilter('ignore', InsecureRequestWarning)
 # --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
 # --- CONFIGURACIÓN DE LA PÁGINA Y ESTADO DE SESIÓN ---
@@ -540,37 +542,56 @@ def display_sidebar_info():
 col_info, col_mapa = st.columns([2, 3]) # Columna izquierda más angosta (ratio 2:3)
 
 if st.session_state.map_generated:
-    # --- VISTA DE RESULTADOS (MODIFICADA) ---
-    with col_info:
-        display_sidebar_info()
-        
-        # --- 1. TÍTULO CENTRADO ---
-        st.markdown("<h3 style='text-align: center;'>Descargar Resultados</h3>", unsafe_allow_html=True)
-        
-        # Contenedor para unificar el ancho de los botones
-        _ , btn_container, _ = st.columns([1, 4, 1])
-        with btn_container:
-            # ... (el código de los botones y el expander no cambia)
-            st.download_button(label="Descargar Datos Geoespaciales (.tif)", data=st.session_state.raster_io, file_name=f"Precipitacion_{st.session_state.report_date_str}.tif", mime="image/tiff", use_container_width=True)
-            st.download_button(label="Descargar Imagen del Mapa (.png)", data=st.session_state.png_buffer, file_name=f"Mapa_Precipitacion_{st.session_state.report_date_str}.png", mime="image/png", use_container_width=True)
-            with st.expander("Ver Resumen y Detalles de los Datos"):
-                if st.session_state.stats_panel_md:
-                    stats = st.session_state.stats_panel_md
-                    st.markdown(stats["header"]); st.subheader("Datos Crudos Extraídos"); st.dataframe(stats["total_df_con_na"].set_index('Name'))
-                    if not stats["outliers_df"].empty: st.subheader("Valores Atípicos Excluidos"); st.dataframe(stats["outliers_df"][['Name', 'ENTIDAD', 'P_mm']].set_index('Name'))
-                    st.subheader("Estadísticas Descriptivas"); st.dataframe(stats["desc_stats"])
-                    if stats["metrics_df"] is not None: st.subheader("Rendimiento de Interpolación"); st.dataframe(stats["metrics_df"].set_index('Método'))
-            if st.button("Realizar Otro Análisis", use_container_width=True): reset_analysis(); st.rerun()
+    # --- 1. ENCABEZADO Y BOTONES DE DESCARGA ---
+    col_h1, col_h2, col_h3 = st.columns([1.3, 0.5, 0.5])
+    with col_h1:
+        # Formatear fecha para el título
+        f_tit = pd.to_datetime(st.session_state.report_date_str).strftime('%d/%m/%Y')
+        st.markdown(f"## 📊 Reporte Pluvial León (Corte: {f_tit})")
+    
+    with col_h2:
+        st.download_button("📥 Descargar Mapa (PNG)", st.session_state.png_buffer, 
+                           f"Mapa_{st.session_state.report_date_str}.png", "image/png", use_container_width=True)
+    
+    with col_h3:
+        if 'fig_plotly' in st.session_state:
+            # Exportar la gráfica interactiva a HTML
+            buf_html = io.StringIO()
+            st.session_state.fig_plotly.write_html(buf_html, full_html=False)
+            st.download_button("📈 Descargar Gráfica", buf_html.getvalue(), 
+                               f"Curvas_{st.session_state.report_date_str}.html", "text/html", use_container_width=True)
 
-    with col_mapa:
-        st.info("✔️ ¡Reporte generado con éxito!")
-        st.header("Mapa de Distribución Pluvial")
+    # --- 2. FILA PRINCIPAL: MAPA Y GRÁFICA LADO A LADO ---
+    col_mapa_viz, col_curva_viz = st.columns([1.3, 1]) # Proporción para que el mapa luzca grande
+    
+    with col_mapa_viz:
+        # Mostramos el mapa de Matplotlib
+        st.pyplot(st.session_state.figure, use_container_width=True)
+    
+    with col_curva_viz:
+        # Mostramos la gráfica interactiva de Plotly
+        if 'fig_plotly' in st.session_state:
+            st.plotly_chart(st.session_state.fig_plotly, use_container_width=True, config={'displayModeBar': False})
+
+    # --- 3. RESUMEN INFERIOR ---
+    st.divider()
+    if st.session_state.stats_panel_md:
+        st.markdown("### 📋 Resumen Ejecutivo y Datos Detallados")
+        c1, c2, c3 = st.columns([1, 1, 1])
+        with c1:
+            st.info(st.session_state.stats_panel_md["header"])
+        with c2:
+            st.markdown("**Estadísticas de Lluvia (mm)**")
+            st.dataframe(st.session_state.stats_panel_md["desc_stats"], hide_index=True, use_container_width=True)
+        with c3:
+            st.markdown("**Lecturas por Estación**")
+            with st.expander("Ver tabla de datos completa"):
+                st.dataframe(st.session_state.stats_panel_md["total_df_con_na"], hide_index=True, use_container_width=True)
         
-        # --- 2. MAPA MÁS PEQUEÑO ---
-        # Creamos columnas para dejar márgenes a los lados y hacer el mapa más angosto
-        _ , map_container, _ = st.columns([1, 5, 1])
-        with map_container:
-            st.pyplot(st.session_state.figure)
+        # Botón para reiniciar abajo de las tablas
+        if st.button("🔄 Realizar Nuevo Análisis", use_container_width=True):
+            reset_analysis()
+            st.rerun()
 else:
     # --- VISTA DE CONFIGURACIÓN Y PROCESAMIENTO ---
     with col_info:
@@ -711,9 +732,114 @@ else:
             st.session_state.progress_percent = 60
             st.rerun()
 
-        # ETAPA 3: Progreso 60% -> 90% (Interpolación)
+        # ETAPA 3: Progreso 60% -> 90% (Cálculos, Excel, Gráfica e Interpolación)
         elif st.session_state.progress_percent == 60:
+            # --- 0. VARIABLES BASE ---
             total_df = st.session_state.total_df_processed
+            report_date_pd = pd.to_datetime(st.session_state.report_date_to_process)
+            ano_act = report_date_pd.year
+            mes_idx = report_date_pd.month - 1
+            EXCEL_PATH = os.path.join("shapefiles", "GRÁFICA.xlsx")
+
+            # --- 1. CÁLCULO PONDERADO (SOLO SAPAL) ---
+            pesos_dict = {
+                'AMALIAS': 10.758, 'CENTRO': 14.641, 'CERRITO DE JEREZ': 15.97,
+                'BLVD. MORELOS': 11.149, 'PRESA EL PALOTE': 55.778, 'EL FARO': 12.157,
+                'SANTA ROSA PLAN DE AYALA': 5.129, 'CIUDAD INDUSTRIAL': 7.153,
+                'VILLAS DE SAN JUAN': 16.754, 'SAPAL TORRES LANDA': 12.577,
+                'EXPLORA': 9.659, 'IBERO': 20.305, 'INSURGENTES': 11.222,
+                'LOMAS DEL MIRADOR': 21.261, 'PARAISO REAL': 116.968,
+                'SAPAL HIDALGO': 9.843, 'SACROMONTE': 14.205, 'LOZA DE LOS PADRES': 45.67,
+                'LOMAS DE IBARRILLA': 223.794, 'MACROCENTRO DEPORTIVO': 10.608,
+                'EL AVELIN': 56.614
+            }
+            
+            sapal_only = total_df[total_df['ENTIDAD'] == 'SAPAL'].copy()
+            sapal_only['Name_Norm'] = sapal_only['Name'].str.upper()
+            suma_productos = 0
+            for st_name, peso in pesos_dict.items():
+                match = sapal_only[sapal_only['Name_Norm'].str.contains(st_name.split()[0])]
+                if not match.empty:
+                    precip = match['P_mm'].values[0]
+                    if pd.notna(precip): suma_productos += (precip * peso)
+            ponderado_mensual_sapal = suma_productos / 702.215
+
+            # --- 2. ACTUALIZACIÓN DE EXCEL Y MEDIA DINÁMICA REAL ---
+            df_hist = pd.read_excel(EXCEL_PATH)
+            df_hist.columns = [str(c).strip() for c in df_hist.columns]
+            col_media_base = next((c for c in df_hist.columns if "MEDIA LEÓN" in c.upper() and "2011-2023" in c), None)
+            
+            if str(ano_act) not in df_hist.columns:
+                df_hist[str(ano_act)] = np.nan
+            df_hist.loc[mes_idx, str(ano_act)] = ponderado_mensual_sapal
+
+            # Lógica de años completos para el título
+            anos_extra = [c for c in df_hist.columns if c.isdigit() and int(c) > 2023]
+            u_completo = 2023
+            for a in anos_extra:
+                if df_hist[a].notna().all():
+                    u_completo = max(u_completo, int(a))
+            
+            # Cálculo de media mes a mes (evita que los ceros de meses futuros la bajen)
+            def calc_media_real(row):
+                s_base = row[col_media_base] * 13
+                # Solo promedia años donde el mes tenga datos (no nulos)
+                vals_extra = [row[a] for a in anos_extra if pd.notna(row[a])]
+                return (s_base + sum(vals_extra)) / (13 + len(vals_extra))
+
+            label_media = f"MEDIA (2011 - {u_completo})"
+            # Limpiar columnas de media anteriores
+            cols_old = [c for c in df_hist.columns if "MEDIA" in c.upper() and c != col_media_base]
+            df_hist.drop(columns=cols_old, inplace=True)
+            df_hist[label_media] = df_hist.apply(calc_media_real, axis=1)
+            df_hist.to_excel(EXCEL_PATH, index=False)
+
+            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (800px) ---
+            meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
+            fig_p = go.Figure()
+            
+            y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
+            fig_p.add_trace(go.Bar(
+                x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}",
+                marker=dict(color=y_actual_acum, colorscale=[[0, '#D1E9FF'], [1, '#0070FF']], showscale=False)
+            ))
+
+            configs = [
+                {'c': str(ano_act), 'color': '#0070FF', 'shadow': '#00264D', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
+                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
+                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'} 
+            ]
+
+            for i, lc in enumerate(configs):
+                if lc['c'] in df_hist.columns:
+                    y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
+                    lim = mes_idx + 1 if lc['c'] == str(ano_act) else 12
+                    dx, dy = meses_labels[:lim], y_v[:lim]
+
+                    # Sombra y Curva agrupadas
+                    fig_p.add_trace(go.Scatter(x=dx, y=dy, mode='lines', line=dict(color=lc['shadow'], width=4, shape='spline'), opacity=0.3, showlegend=False, legendgroup=lc['name']))
+                    fig_p.add_trace(go.Scatter(x=dx, y=dy, mode='lines+markers', name=lc['name'], legendgroup=lc['name'], 
+                                             line=dict(color=lc['color'], width=3, shape='spline', dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
+                                             marker=dict(size=9, symbol=lc['sym'], line=dict(color='white', width=1.5))))
+                    
+                    # Callout con Línea (Leader line)
+                    val = dy.iloc[-1]
+                    fig_p.add_trace(go.Scatter(
+                        x=[dx[-1], dx[-1]], y=[val, val + 40 + (i*15)], # Escalonado para no traslapar
+                        mode='lines+text', text=["", f"<b>{val:.1f}</b>"], textposition="top center",
+                        line=dict(color='black', width=1), showlegend=False, legendgroup=lc['name']
+                    ))
+
+            fig_p.update_layout(
+                height=800, margin=dict(b=100),
+                xaxis=dict(tickangle=-45, showgrid=False, tickfont=dict(family="Arial Black", size=10)),
+                yaxis=dict(dtick=100, showgrid=True, gridcolor='rgba(0,0,0,0.1)', griddash='dash', layer='below traces', showticklabels=False, zeroline=False),
+                plot_bgcolor='white', paper_bgcolor='white',
+                legend=dict(orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, bgcolor="rgba(255,255,255,0.7)")
+            )
+            st.session_state.fig_plotly = fig_p
+
+            # --- 4. LÓGICA ESPACIAL ORIGINAL (RESTAURADA) ---
             total_df_con_na = total_df.copy(); st.session_state.total_df_con_na = total_df_con_na
             if total_df.dropna(subset=['P_mm']).empty: st.error("No se encontraron datos válidos."); st.stop()
             
@@ -884,6 +1010,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
