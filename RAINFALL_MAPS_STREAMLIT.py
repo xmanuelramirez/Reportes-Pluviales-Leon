@@ -845,7 +845,7 @@ else:
                     ))
 
             fig_p.update_layout(
-                        height=900, 
+                        height=870, 
                         margin=dict(b=100, l=5, r=50, t=10),
                         # FONDO TRANSPARENTE
                         plot_bgcolor='rgba(0,0,0,0)', 
@@ -1059,16 +1059,16 @@ else:
             ax.grid(True, linestyle=':', alpha=0.3, color='white', zorder=0)
 
             # --- LEYENDA (SIMBOLOGÍA) ---
-            # Buscamos la leyenda para volverla transparente y blanca
-            leg = ax.get_legend()
+            # Busca esta parte en tu código de la Etapa 4 y asegúrate de que esté así:
+            leg = ax.get_legend() # Obtener la leyenda actual
             if leg:
                 leg.get_frame().set_facecolor('none') # Fondo transparente
                 leg.get_frame().set_edgecolor('white') # Borde blanco
-                leg.get_frame().set_linewidth(1)
-                leg.get_title().set_color('white') # Título "SIMBOLOGÍA" en blanco
-                leg.get_title().set_weight('bold')
                 for text in leg.get_texts():
-                    text.set_color('white') # Todos los items en blanco
+                    text.set_color('white') # Letras de la leyenda blancas
+                leg.get_title().set_color('white') # Título "SIMBOLOGÍA" blanco
+                            for text in leg.get_texts():
+                                text.set_color('white') # Todos los items en blanco
 
             # --- BARRA DE COLOR (COLORBAR) ---
             if 'cb' in locals():
@@ -1141,6 +1141,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
