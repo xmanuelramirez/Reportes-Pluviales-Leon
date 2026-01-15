@@ -809,21 +809,21 @@ else:
             fig_p = go.Figure()
             
             # --- BARRAS CON DEGRADADO HORIZONTAL Y TRANSPARENCIA ---
-            # De izquierda (Enero: muy transparente y claro) a derecha (Diciembre: más opaco y oscuro)
-            colors_bars = [f'rgba(0, 176, 255, {0.15 + (i * 0.06)})' for i in range(12)]
+            # Izquierda (Enero) muy claro/transparente -> Derecha (Diciembre) azul sólido
+            colors_bars = [f'rgba(0, 112, 255, {0.2 + (i * 0.06)})' for i in range(12)]
             
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
                 x=meses_labels, y=y_actual_acum, 
                 name=f"Acumulado {ano_act}",
                 marker=dict(
-                    color=colors_bars, # Aplicar lista de colores para degradado horizontal
+                    color=colors_bars, 
                     line=dict(color='rgba(255,255,255,0.2)', width=0.5)
                 ),
                 hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            # Configuración de Curvas (Neón)
+            # Configuración de Curvas (Neón - Sin Azul)
             configs = [
                 {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
                 {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
@@ -833,6 +833,7 @@ else:
 
             for i, lc in enumerate(configs):
                 if lc['c'] in df_hist.columns:
+                    # Cálculo de acumulado
                     y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
                     
                     is_current = (lc['c'] == str(ano_act))
@@ -859,11 +860,11 @@ else:
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
                     
-                    # 3. CALLOUTS DINÁMICOS (VERTICAL PARA ACTUAL / HORIZONTAL CON GAP PARA TERMINADOS)
+                    # 3. CALLOUTS DINÁMICOS (TOGGLE CON LEYENDA)
                     if is_current:
-                        # VERTICAL: Línea blanca hacia arriba
+                        # VERTICAL (Año en curso): Línea blanca hacia arriba
                         fig_p.add_trace(go.Scatter(
-                            x=[last_x, last_x], y=[last_y, last_y + 60],
+                            x=[last_x, last_x], y=[last_y, last_y + 50],
                             mode='lines+text',
                             text=["", f"<b>{last_y:.1f}</b>"],
                             textposition="top center",
@@ -872,24 +873,22 @@ else:
                             showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
                         ))
                     else:
-                        # HORIZONTAL: Fuera de las barras hacia la derecha (GAP)
-                        # Usamos anotaciones para tener control total del "offset" en píxeles
-                        fig_p.add_annotation(
-                            x=last_x, y=last_y,
-                            text=f"<b>{last_y:.1f}</b>",
-                            showarrow=False,
-                            xanchor="left",
-                            xshift=15, # Este es el GAP (espacio) hacia la derecha
-                            font=dict(color=lc['color'], size=12), # Color de la curva para identificarlo
-                            bgcolor="rgba(0,0,0,0)",
-                            legendgroup=lc['name'] # Nota: annotations no soportan legendgroup nativo en algunas versiones, 
-                                                 # pero el texto se oculta si el eje es coherente.
-                        )
+                        # HORIZONTAL (Años terminados): Fuera de las barras a la derecha
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x], y=[last_y],
+                            mode='markers+text',
+                            # Agregamos espacios en blanco antes del número para crear el "GAP" visual
+                            text=[f"    <b>{last_y:.1f}</b>"], 
+                            textposition="middle right",
+                            textfont=dict(color=lc['color'], size=13),
+                            marker=dict(opacity=0), # Punto invisible para no manchar la curva
+                            showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                        ))
 
             # --- DISEÑO DE LAYOUT ---
             fig_p.update_layout(
                 height=800, 
-                margin=dict(b=120, l=10, r=100, t=10), # Margen derecho amplio (100) para los callouts
+                margin=dict(b=120, l=10, r=100, t=10), # Margen derecho para los callouts
                 plot_bgcolor='rgba(0,0,0,0)', 
                 paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(
@@ -907,7 +906,6 @@ else:
                 )
             )
             st.session_state.fig_plotly = fig_p
-
             # --- 4. LÓGICA ESPACIAL ORIGINAL (RESTAURADA) ---
             total_df_con_na = total_df.copy(); st.session_state.total_df_con_na = total_df_con_na
             if total_df.dropna(subset=['P_mm']).empty: st.error("No se encontraron datos válidos."); st.stop()
@@ -1146,6 +1144,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
