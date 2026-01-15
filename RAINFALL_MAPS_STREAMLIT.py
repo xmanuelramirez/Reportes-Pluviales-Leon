@@ -808,23 +808,20 @@ else:
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
             
-            # --- BARRAS AZULES CON DEGRADADO VERTICAL (Dependiente del valor Y) ---
+            # --- BARRAS CON COLOR POR ALTURA ---
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
-                x=meses_labels, 
-                y=y_actual_acum, 
+                x=meses_labels, y=y_actual_acum, 
                 name=f"Acumulado {ano_act}",
                 marker=dict(
-                    color=y_actual_acum, # Mapeo de color a la altura (Y) para degradado vertical
-                    colorscale=[[0, '#003366'], [1, '#0070FF']], # De azul oscuro (base) a azul brillante (punta)
-                    showscale=False,
-                    line=dict(color='rgba(255,255,255,0.2)', width=0.5)
+                    color=y_actual_acum,
+                    colorscale=[[0, '#001A33'], [1, '#00BFFF']], # Contraste fuerte para simular profundidad
+                    line=dict(color='white', width=0.5)
                 ),
                 hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            # --- CONFIGURACIÓN DE CURVAS (Colores Neón - Sin Azul en curvas) ---
-            # Año Actual: Amarillo Neón | Año-1: Verde Neón | Año-2: Rosa Neón | Media: Naranja Neón
+            # Configuración de Curvas (Sin Azul)
             configs = [
                 {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
                 {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
@@ -835,17 +832,23 @@ else:
             for i, lc in enumerate(configs):
                 if lc['c'] in df_hist.columns:
                     y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
-                    lim = mes_idx + 1 if lc['c'] == str(ano_act) else 12
-                    dx, dy = meses_labels[:lim], y_v[:lim]
+                    
+                    # Definir si está terminado (12 meses) o no
+                    is_current = (lc['c'] == str(ano_act))
+                    limit = mes_idx + 1 if is_current else 12
+                    
+                    dx, dy = meses_labels[:limit], y_v[:limit]
+                    last_x = dx[-1]
+                    last_y = dy.iloc[-1]
 
-                    # 1. SOMBRA OSCURA (AGRUPADA)
+                    # 1. SOMBRA
                     fig_p.add_trace(go.Scatter(
                         x=dx, y=dy, mode='lines',
                         line=dict(color=lc['shadow'], width=5, shape='spline', smoothing=1.3),
-                        opacity=0.4, hoverinfo='skip', showlegend=False, legendgroup=lc['name']
+                        opacity=0.4, showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
                     ))
 
-                    # 2. CURVA PRINCIPAL (MARCADORES DIFERENTES)
+                    # 2. CURVA PRINCIPAL
                     fig_p.add_trace(go.Scatter(
                         x=dx, y=dy, mode='lines+markers', name=lc['name'],
                         legendgroup=lc['name'],
@@ -855,51 +858,51 @@ else:
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
                     
-                    # 3. CALLOUT CON LÍNEA NEGRA (Leader line)
-                    val = dy.iloc[-1]
-                    offset_y = 50 + (i * 20) # Separación para que no choquen
+                    # 3. CALLOUTS CON LÓGICA DE ORIENTACIÓN
+                    # Si es el año actual (incompleto) -> Línea Vertical (Hacia arriba)
+                    # Si es año pasado (completo) -> Línea Horizontal (Hacia la derecha)
                     
+                    if is_current:
+                        # VERTICAL (Hacia arriba)
+                        c_x = [last_x, last_x]
+                        c_y = [last_y, last_y + 60]
+                        c_pos = "top center"
+                    else:
+                        # HORIZONTAL (Hacia la derecha)
+                        # Usamos un pequeño truco de desplazamiento en X
+                        c_x = [last_x, last_x] # Plotly maneja el texto mejor con offset en 'textposition'
+                        c_y = [last_y, last_y]
+                        c_pos = "middle right"
+
                     fig_p.add_trace(go.Scatter(
-                        x=[dx[-1], dx[-1]], 
-                        y=[val, val + offset_y],
-                        mode='lines+text',
-                        text=["", f"<b>{val:.1f}</b>"],
-                        textposition="top center",
+                        x=c_x, y=c_y,
+                        mode='lines+text' if is_current else 'markers+text',
+                        text=["", f"<b>{last_y:.1f}</b>"] if is_current else [f"<b>{last_y:.1f}</b>"],
+                        textposition=c_pos,
                         textfont=dict(color='white', size=13),
-                        line=dict(color='white', width=1.2), # Línea blanca para resaltar en fondo negro
+                        line=dict(color='white', width=1) if is_current else None,
+                        marker=dict(opacity=0) if not is_current else None,
                         showlegend=False,
                         legendgroup=lc['name'],
                         hoverinfo='skip'
                     ))
 
-            # --- DISEÑO DE LAYOUT (MODO OSCURO / TRANSPARENTE) ---
+            # --- DISEÑO DE LAYOUT ---
             fig_p.update_layout(
-                height=800, 
-                margin=dict(b=120, l=5, r=50, t=10),
-                plot_bgcolor='rgba(0,0,0,0)', 
-                paper_bgcolor='rgba(0,0,0,0)',
+                height=800, margin=dict(b=120, l=10, r=80, t=10), # Más margen a la derecha para callouts horizontales
+                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(
-                    tickangle=-45, 
-                    showgrid=False, 
+                    tickangle=-45, showgrid=False, 
                     tickfont=dict(family="Arial Black", size=10, color="white"),
-                    showline=True, 
-                    linecolor='white'
+                    showline=True, linecolor='white'
                 ),
                 yaxis=dict(
-                    dtick=100, 
-                    showgrid=True,
-                    gridcolor='rgba(255,255,255,0.15)', 
-                    griddash='dash', 
-                    layer='below traces', 
-                    showticklabels=False, 
-                    zeroline=False
+                    dtick=100, showgrid=True, gridcolor='rgba(255,255,255,0.15)', 
+                    griddash='dash', layer='below traces', showticklabels=False, zeroline=False
                 ),
                 legend=dict(
-                    orientation="v", 
-                    yanchor="top", y=0.98, 
-                    xanchor="left", x=0.02, 
-                    font=dict(size=11, color="white"), 
-                    bgcolor="rgba(0,0,0,0.4)"
+                    orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, 
+                    font=dict(size=11, color="white"), bgcolor="rgba(0,0,0,0.4)"
                 )
             )
             st.session_state.fig_plotly = fig_p
@@ -1142,6 +1145,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
