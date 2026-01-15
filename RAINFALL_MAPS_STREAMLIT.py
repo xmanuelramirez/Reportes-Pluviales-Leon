@@ -824,20 +824,20 @@ else:
                     
                     # Callout con Línea (Leader line)
                     val = dy.iloc[-1]
-                            offset_y = 40 + (i * 15) 
+                    offset_y = 40 + (i * 15) 
                             
-                            fig_p.add_trace(go.Scatter(
-                                x=[dx[-1], dx[-1]], 
-                                y=[val, val + offset_y],
-                                mode='lines+text',
-                                text=["", f"<b>{val:.1f}</b>"],
-                                textposition="top center",
-                                textfont=dict(color='white', size=12), # Texto blanco
-                                line=dict(color='rgba(255,255,255,0.7)', width=1), # Línea blanca tenue
-                                showlegend=False,
-                                legendgroup=lc['name'],
-                                hoverinfo='skip'
-                            ))
+                    fig_p.add_trace(go.Scatter(
+                        x=[dx[-1], dx[-1]], 
+                        y=[val, val + offset_y],
+                        mode='lines+text',
+                        text=["", f"<b>{val:.1f}</b>"],
+                        textposition="top center",
+                        textfont=dict(color='white', size=12),
+                        line=dict(color='rgba(255,255,255,0.7)', width=1),
+                        showlegend=False,
+                        legendgroup=lc['name'],
+                        hoverinfo='skip'
+                    ))
 
             fig_p.update_layout(
                         height=800, 
@@ -1043,6 +1043,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
