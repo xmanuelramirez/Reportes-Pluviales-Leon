@@ -11,7 +11,7 @@ from urllib3.exceptions import InsecureRequestWarning
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 import rasterio
 from rasterio.mask import mask # Importación corregida
- 
+import plotly.graph_objects as go
 import streamlit as st
 import pandas as pd
 import geopandas as gpd
@@ -1010,6 +1010,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
