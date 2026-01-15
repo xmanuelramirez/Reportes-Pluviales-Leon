@@ -492,26 +492,28 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
     with rasterio.open(final_raster_io, "w", **out_meta) as dest: dest.write(out_image)
     final_raster_io.seek(0)
     return {"raster_io": final_raster_io, "raster_image": out_image, "raster_meta": out_meta, "best_method": best_method_row['Método']}, metrics_df
+    
 @st.cache_resource
 def load_geodata():
-    shapefile_path = "shapefiles"
+    shapefile_path = "shapefiles" # Ajusta según tu carpeta
     try:
         data = {
             "boundary": gpd.read_file(os.path.join(shapefile_path, "LIMITE.shp")),
             "stations": gpd.read_file(os.path.join(shapefile_path, "ESTACIONES_actualizado.shp")),
             "hillshade": rasterio.open(os.path.join(shapefile_path, "HILLSHADE_LEON.tif")),
-            "urban": gpd.read_file(os.path.join(shapefile_path, "LIMITE_URBANO.shp")),
-            "cuenca": gpd.read_file(os.path.join(shapefile_path, "CUENCA_PALOTE.shp")),
-            "presa": gpd.read_file(os.path.join(shapefile_path, "EL PALOTE.shp")),
-            "streams": gpd.read_file(os.path.join(shapefile_path, "CORRIENTES_LEON_012025.shp"))
+            # ... el resto de tus capas ...
         }
+        # CARGA DE LOGOS
         try:
-            data["logo"] = mpimg.imread(os.path.join(shapefile_path, "logo_sapal.png"))
-        except FileNotFoundError:
-            data["logo"] = None
+            data["logo_azul"] = mpimg.imread(os.path.join(shapefile_path, "logo_sapal_azul.png"))
+            data["logo_blanco"] = mpimg.imread(os.path.join(shapefile_path, "logo_sapal_blanco.png"))
+        except:
+            data["logo_azul"] = None
+            data["logo_blanco"] = None
+            st.error("No se encontraron los archivos de logo_sapal_azul.png o blanco.")
         return data
     except Exception as e:
-        st.error(f"Error fatal al cargar archivos geoespaciales: {e}")
+        st.error(f"Error fatal: {e}")
         st.stop()
 
 geodata = load_geodata()
@@ -1014,106 +1016,81 @@ else:
                 cb.ax.tick_params(labelsize=9)
                 for spine in cbar_ax.spines.values(): spine.set_edgecolor('black'); spine.set_linewidth(1)
             
-            if geodata["logo"] is not None:
-                aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1]
-                logo_width = total_width * 0.15; logo_height = logo_width * aspect_ratio
-                logo_x = total_maxx - (total_width * 0.02) - logo_width
-                logo_y = total_miny + (total_height * 0.02)
-                ax.imshow(geodata["logo"], extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height], aspect='auto', zorder=10)
-            
-            ax.grid(True, linestyle=':', alpha=0.6, color='black')
-            
+            # --- PREPARACIÓN DE POSICIÓN DEL LOGO ---
+            if geodata["logo_azul"] is not None:
+                aspect_ratio = geodata["logo_azul"].shape[0] / geodata["logo_azul"].shape[1]
+                logo_w = total_width * 0.12
+                logo_h = logo_w * aspect_ratio
+                l_x = total_maxx - (total_width * 0.03) - logo_w
+                l_y = total_miny + (total_height * 0.03)
+
+                # A. INSERTAR LOGO AZUL PARA EXPORTACIÓN
+                # Guardamos el objeto en una variable para poder borrarlo luego
+                img_logo_obj = ax.imshow(geodata["logo_azul"], extent=[l_x, l_x + logo_w, l_y, l_y + logo_h], aspect='auto', zorder=15)
+
+            # --- 1. GUARDAR VERSIÓN ESTÁNDAR (CON LOGO AZUL Y FONDO BLANCO) ---
             png_buffer = io.BytesIO()
-            fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', bbox_inches='tight', pad_inches=0.2)
+            fig.savefig(png_buffer, format="png", dpi=300, facecolor='white', edgecolor='none', pad_inches=0.2)
             png_buffer.seek(0)
-            # --- FIN DE TU CÓDIGO DE PLOTEO ORIGINAL ---
-           
 
-            # --- 2. TRANSFORMAR EL MAPA A "MODO OSCURO" TOTAL PARA LA APP ---
-            # Fondo de la figura y del mapa 100% transparentes
+            # --- 2. TRANSFORMACIÓN A MODO OSCURO (PARA LA APP) ---
+            # Borrar el logo azul del mapa
+            if 'img_logo_obj' in locals():
+                img_logo_obj.remove()
+                # INSERTAR LOGO BLANCO
+                ax.imshow(geodata["logo_blanco"], extent=[l_x, l_x + logo_w, l_y, l_y + logo_h], aspect='auto', zorder=15)
+
+            # Fondo transparente
             fig.patch.set_facecolor('none')
-            fig.patch.set_alpha(0.0)
             ax.set_facecolor('none')
-            ax.patch.set_alpha(0.0)
 
-            # --- TEXTOS PRINCIPALES ---
-            # Título principal (usamos set_title o textos manuales)
+            # --- APLICAR BLANCO A TODO EL TEXTO ---
             ax.title.set_color('white')
-            ax.title.set_weight('bold')
-
-            # Coordenadas de los ejes (Números)
-            ax.tick_params(axis='both', colors='white', which='both', labelsize=10)
+            ax.tick_params(axis='both', colors='white')
+            from matplotlib import patheffects # Asegurar import local
             for label in ax.get_xticklabels() + ax.get_yticklabels():
                 label.set_color('white')
-                # Sombra negra muy sutil para que resalte sobre el mapa
                 label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='black', alpha=0.5)])
 
-            # --- MARCOS Y GRILLA ---
-            # Cuadro que rodea el mapa (Spines)
-            for spine in ax.spines.values():
-                spine.set_edgecolor('white')
-                spine.set_linewidth(1.5)
-                spine.set_visible(True)
+            # Marcos, Grilla y Leyenda en Blanco
+            for spine in ax.spines.values(): spine.set_edgecolor('white')
+            ax.grid(True, linestyle=':', alpha=0.3, color='white')
 
-            # Grilla (Líneas de coordenadas punteadas)
-            ax.grid(True, linestyle=':', alpha=0.3, color='white', zorder=0)
-
-            # --- LEYENDA (SIMBOLOGÍA) ---
-            # Busca esta parte en tu código de la Etapa 4 y asegúrate de que esté así:
-            leg = ax.get_legend() # Obtener la leyenda actual
+            leg = ax.get_legend()
             if leg:
-                leg.get_frame().set_facecolor('none') # Fondo transparente
-                leg.get_frame().set_edgecolor('white') # Borde blanco
-                for text in leg.get_texts():
-                    text.set_color('white') # Letras de la leyenda blancas
-                leg.get_title().set_color('white') # Título "SIMBOLOGÍA" blanco
-                for text in leg.get_texts():
-                    text.set_color('white') # Todos los items en blanco
+                leg.get_frame().set_facecolor('none')
+                leg.get_frame().set_edgecolor('white')
+                leg.get_title().set_color('white')
+                for text in leg.get_texts(): text.set_color('white')
 
-            # --- BARRA DE COLOR (COLORBAR) ---
+            # Barra de color y otros textos flotantes
             if 'cb' in locals():
                 cb.ax.yaxis.set_tick_params(color='white', labelcolor='white')
                 cb.ax.title.set_color('white')
-                cb.ax.title.set_weight('bold')
                 cb.outline.set_edgecolor('white')
-                cb.outline.set_linewidth(1)
-                # Cambiar el color de los números de la barra de color
-                plt.setp(plt.getp(cb.ax.axes, 'yticklabels'), color='white')
-
-            # --- TEXTOS FLOTANTES (Norte, Escala, Títulos manuales) ---
-            # Iteramos sobre todos los textos del mapa para asegurar blancura total
-            for t in ax.texts:
-                t.set_color('white')
-                # Si el texto es del Norte o Escala, aseguramos que se vea
-                if t.get_text() in ['N', 'S', 'E', 'W', '0', '2.5', '5 km']:
-                    t.set_weight('bold')
-
-            # --- ESCALA GRÁFICA (Barras Blanco/Negro) ---
-            # Convertimos lo que era blanco en transparente y lo negro en blanco
+            
+            for t in ax.texts: t.set_color('white')
+            
+            # Ajustar Escala Gráfica
             for patch in ax.patches:
                 if isinstance(patch, plt.Rectangle):
-                    # Si el rectángulo es casi blanco, lo hacemos transparente con borde blanco
                     fc = patch.get_facecolor()
-                    if fc[0] > 0.8: # Es blanco
-                        patch.set_facecolor('none')
-                        patch.set_edgecolor('white')
-                        patch.set_linewidth(1)
-                    else: # Es negro
-                        patch.set_facecolor('white')
-                        patch.set_edgecolor('white')
+                    if fc[0] > 0.8: # Segmentos blancos
+                        patch.set_facecolor('none'); patch.set_edgecolor('white')
+                    else: # Segmentos negros
+                        patch.set_facecolor('white'); patch.set_edgecolor('white')
 
-            # --- 3. FINALIZACIÓN Y GUARDADO ---
+            # --- 3. GUARDAR EN SESSION STATE Y TERMINAR ---
             st.session_state.figure = fig
             st.session_state.raster_io = raster_io
             st.session_state.png_buffer = png_buffer
             st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
 
-            # Preparar Estadísticas (No cambia)
+            # Estadísticas descriptivas
             desc_stats = stations_filtered_gdf['P_mm'].describe().to_frame().T.rename(
                 columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'}
             )
             report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-            
             stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
             
             st.session_state.stats_panel_md = {
@@ -1125,7 +1102,6 @@ else:
             st.session_state.processing_state = 'idle'
             st.session_state.progress_percent = 100
             st.rerun()
-
 
            
 
@@ -1141,6 +1117,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
