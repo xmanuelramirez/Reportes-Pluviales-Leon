@@ -893,7 +893,7 @@ else:
                             ))
 
             fig_p.update_layout(
-                height=800, margin=dict(b=100, l=10, r=120, t=50),
+                height=700, margin=dict(b=100, l=10, r=120, t=50),
                 plot_bgcolor='white', paper_bgcolor='white',
                 xaxis=dict(
                     tickangle=-45, showgrid=False, tickfont=dict(color="black", family="Arial Black"), 
@@ -1438,6 +1438,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
