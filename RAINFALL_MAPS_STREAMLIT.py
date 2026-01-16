@@ -910,44 +910,81 @@ else:
             # --- 1. CONFIGURACIÓN DE LIENZO ---
             fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
             ax.set_facecolor('white')
-            fig.subplots_adjust(right=0.78, left=0.05, top=0.92, bottom=0.05)
+            fig.subplots_adjust(right=0.7)
             
-            # --- 2. AJUSTE DE EXTENSIÓN (Zoom al Municipio + Cuenca) ---
+            # Trazado de elementos base que siempre deben estar presentes
             limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
             cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
             
-            l_b = limite_gdf.total_bounds
-            c_b = cuenca_gdf.total_bounds
-            t_minx, t_miny = min(l_b[0], c_b[0]), min(l_b[1], c_b[1])
-            t_maxx, t_maxy = max(l_b[2], c_b[2]), max(l_b[3], c_b[3])
+            # Obtener los límites de ambas capas para asegurar que todo quepa en el mapa
+            lim_bounds = limite_gdf.total_bounds
+            cue_bounds = cuenca_gdf.total_bounds
             
-            t_w, t_h = t_maxx - t_minx, t_maxy - t_miny
-            ax.set_xlim(t_minx - t_w*0.05, t_maxx + t_w*0.05)
-            ax.set_ylim(t_miny - t_h*0.05, t_maxy + t_h*0.05)
+            # Combinar los límites para obtener la extensión total
+            total_minx = min(lim_bounds[0], cue_bounds[0])
+            total_miny = min(lim_bounds[1], cue_bounds[1])
+            total_maxx = max(lim_bounds[2], cue_bounds[2])
+            total_maxy = max(lim_bounds[3], cue_bounds[3])
+            
+            # Calcular el margen basándose en la extensión total combinada
+            total_width = total_maxx - total_minx
+            total_height = total_maxy - total_miny
+            x_margin = total_width * 0.05  # 5% de margen a cada lado
+            y_margin = total_height * 0.05 # 5% de margen arriba y abajo
+
+            # Establecer los límites finales del mapa para que todo sea visible
+            ax.set_xlim(total_minx - x_margin, total_maxx + x_margin)
+            ax.set_ylim(total_miny - y_margin, total_maxy + y_margin)
 
             # --- 3. CAPAS RASTER (Relieve y Lluvia) ---
-            # Hillshade (Sombreado de relieve)
             boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
-            clipped_hill, clipped_trans = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
-            hill_data = clipped_hill[0].astype(float)
-            hill_data[hill_data == 255] = np.nan
-            ax.imshow(hill_data, extent=[clipped_trans[2], clipped_trans[2] + clipped_trans[0] * hill_data.shape[1], 
-                                         clipped_trans[5] + clipped_trans[4] * hill_data.shape[0], clipped_trans[5]], 
-                      cmap='gray', alpha=0.4, zorder=1)
+            clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
+            hillshade_data = clipped_hillshade[0].astype(float)
+            hillshade_data[hillshade_data == 255] = np.nan
+            
+            # --- ASIGNACIÓN DE ZORDER CORREGIDA ---
+            # ZORDER 1: Capa base de relieve (lo más bajo)
+            im = ax.imshow(hillshade_data,
+                           extent=[clipped_transform[2],
+                                   clipped_transform[2] + clipped_transform[0] * hillshade_data.shape[1],
+                                   clipped_transform[5] + clipped_transform[4] * hillshade_data.shape[0],
+                                   clipped_transform[5]],
+                           cmap='gray', alpha=0.7, aspect='equal', zorder=1)
 
-            # Mancha de Calor (Precipitación)
+            # Lógica de trazado de la capa de precipitación con enmascaramiento
             if interpolation_results and np.any(interpolation_results["raster_image"]):
-                r_img = np.ma.masked_invalid(interpolation_results["raster_image"])
-                r_meta = interpolation_results["raster_meta"]
-                # Colormap: Rojo -> Amarillo -> Azul
-                custom_cmap = LinearSegmentedColormap.from_list('precip', ['#f03725', '#F3FD89', '#1FB6EA'])
-                p_min, p_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
-                show(r_img, ax=ax, transform=r_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=p_min, vmax=p_max, zorder=2)
+                raster_image = np.ma.masked_invalid(interpolation_results["raster_image"])
+                raster_meta = interpolation_results["raster_meta"]
+                custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
+                precip_min = stations_filtered_gdf['P_mm'].min()
+                precip_max = stations_filtered_gdf['P_mm'].max()
+                # ### CAMBIO AQUÍ ###: ZORDER 2 para la precipitación (debajo de los ríos)
+                show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
+                raster_io = interpolation_results['raster_io']
+            else:
+                log_messages.append("⚠️ No se trazó la capa de precipitación por falta de datos o error de interpolación.")
+                raster_io = None
 
             # --- 4. CAPAS VECTORIALES ---
             # Corrientes de Agua (Azul fuerte)
-            geodata['streams'].to_crs(geodata['hillshade'].crs).plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
-            
+            streams_gdf = geodata['streams'].to_crs(geodata['hillshade'].crs)
+            if 'order_1' in streams_gdf.columns:
+                order_col = 'order_1'
+                unique_orders = sorted(streams_gdf[order_col].dropna().unique())
+                for order in unique_orders:
+                    subset = streams_gdf[streams_gdf[order_col] == order]
+                    linewidth = 0.1 + (order * 0.1) if pd.notna(order) else 0.1
+                    subset.plot(ax=ax, color='#10008C', linewidth=linewidth, label=f'Orden {order}', zorder=3)
+            else:
+                streams_gdf.plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
+
+            # Asegurar fondo blanco y bordes de mapa
+            ax.set_facecolor('white')
+            fig.patch.set_facecolor('white')
+            ax.patch.set_facecolor('white')
+            for spine in ax.spines.values():
+                spine.set_edgecolor('black')
+                spine.set_linewidth(1)
             # Límite Municipal (Verde)
             limite_gdf.plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2.5, zorder=4)
             
@@ -972,50 +1009,114 @@ else:
             for spine in ax.spines.values(): spine.set_edgecolor('black')
             ax.grid(True, linestyle=':', alpha=0.4, color='gray')
 
-            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", 
-                         fontsize=15, fontweight='bold', loc='left', color='black', pad=20)
-            
-            # Flecha Norte y Escala
+            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
+            ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
+            for label in ax.get_xticklabels(): label.set_fontweight('bold'); label.set_rotation(0)
+            for label in ax.get_yticklabels(): label.set_fontweight('bold'); label.set_rotation(90)
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}')); ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+            ax.set_xlabel(""); ax.set_ylabel("")
             add_north_arrow(ax)
+            # 1. Parámetros de la barra de escala
+            scale_length_m = 5000  # Longitud total de la barra en metros (5 km)
+            scale_segments = 5     # Número de divisiones (blanco y negro)
             
-            # Barra de escala manual (5 km)
-            scale_x = t_minx + t_w*0.02
-            scale_y = t_miny + t_h*0.02
-            for i in range(5):
+            # 2. Calcular la posición de anclaje (esquina inferior izquierda)
+            # Usaremos el mismo margen que para el logo para mantener la consistencia
+            map_width = total_maxx - total_minx
+            map_height = total_maxy - total_miny
+            margin_x = map_width * 0.02
+            margin_y = map_height * 0.02
+            
+            # Coordenada 'x' e 'y' de la esquina inferior izquierda de la barra
+            scale_x = total_minx + margin_x
+            scale_y = total_miny + margin_y
+            
+            # 3. Dibujar los segmentos de la barra (rectángulos)
+            segment_length = scale_length_m / scale_segments
+            bar_height = map_height * 0.007 # Altura de la barra, relativa al mapa
+
+            for i in range(scale_segments):
                 color = 'black' if i % 2 == 0 else 'white'
-                ax.add_patch(plt.Rectangle((scale_x + i*1000, scale_y), 1000, t_h*0.007, facecolor=color, edgecolor='black', zorder=10))
-            ax.text(scale_x, scale_y - t_h*0.01, '0', ha='center', fontsize=9, weight='bold')
-            ax.text(scale_x + 5000, scale_y - t_h*0.01, '5 km', ha='center', fontsize=9, weight='bold')
+                rect = plt.Rectangle(
+                    (scale_x + i * segment_length, scale_y),  # Posición (x, y)
+                    segment_length,                           # Ancho
+                    bar_height,                               # Alto
+                    facecolor=color,
+                    edgecolor='black',
+                    linewidth=1,
+                    zorder=10  # zorder alto para que esté encima de todo
+                )
+                ax.add_patch(rect)
 
-            # --- 6. LEYENDAS ---
-            # Barra de colores de lluvia
-            if 'p_min' in locals():
-                cbar_ax = fig.add_axes([0.80, 0.15, 0.02, 0.3])
-                norm = Normalize(vmin=p_min, vmax=p_max)
-                cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm)
-                cb.set_label('Precipitación (mm)', size=11, weight='bold')
-                cb.ax.tick_params(labelsize=10)
-
-            # Cuadro de Simbología
-            leg_el = [
+            # 4. Dibujar las etiquetas de texto UNA SOLA VEZ (fuera del bucle)
+            text_offset = map_height * 0.008 # Distancia del texto a la barra
+            text_y_pos = scale_y - text_offset
+            
+            ax.text(scale_x, text_y_pos, '0', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+            ax.text(scale_x + scale_length_m / 2, text_y_pos, '2.5', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+            ax.text(scale_x + scale_length_m, text_y_pos, '5 km', ha='center', va='top', fontsize=8, weight='bold', zorder=10)
+            legend_elements = [
                 Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
+                Patch(facecolor='none', edgecolor='black', linewidth=1, label='LÍMITE URBANO'),
                 Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'),
                 Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'),
-                Line2D([0], [0], color='#10008C', lw=1.5, label='CORRIENTES DE AGUA'),
-                Line2D([0], [0], marker='s', color='none', markeredgecolor='black', markerfacecolor='#55FF00', markersize=10, label='CONAGUA', linestyle='None'),
-                Line2D([0], [0], marker='s', color='none', markeredgecolor='black', markerfacecolor='#00C5FF', markersize=10, label='SAPAL', linestyle='None')
+                Line2D([0], [0], color='#10008C', lw=1, label='CORRIENTES DE AGUA'),
+                Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA',
+                       markerfacecolor='#55FF00', markeredgecolor='black', markersize=8, linestyle='None'),
+                Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL',
+                       markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None')
             ]
-            ax.legend(handles=leg_el, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=11, title='SIMBOLOGÍA', 
-                      title_fontsize=12, frameon=True, facecolor='white', edgecolor='black').get_title().set_fontweight('bold')
+            
+            legend_ax = ax.legend(handles=legend_elements,
+                                  bbox_to_anchor=(1.02, 1),
+                                  loc='upper left',
+                                  fontsize=10,
+                                  title='SIMBOLOGÍA',
+                                  title_fontsize=12,
+                                  frameon=True,
+                                  edgecolor='black',
+                                  facecolor='white')
+            legend_ax.get_title().set_fontweight('bold')
+
+            # BARRA DE COLOR VERTICAL DENTRO DEL CUADRO DE LEYENDA
+            if interpolation_results and np.any(interpolation_results["raster_image"]):
+                # Posicionar la barra debajo de la leyenda
+                cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])  # [left, bottom, width, height] - VERTICAL
+                norm = Normalize(vmin=precip_min, vmax=precip_max)
+                cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm, orientation='vertical')
+                cb.ax.set_title('Precipitación\nAcumulada (mm)', size=10, weight='bold', pad=15)
+                cb.ax.tick_params(labelsize=9)
+                
+                # Marco alrededor de la barra
+                for spine in cbar_ax.spines.values():
+                    spine.set_edgecolor('black')
+                    spine.set_linewidth(1)
 
             # --- 7. LOGO AZUL (ESQUINA INFERIOR DERECHA) ---
             if geodata["logo_azul"] is not None:
-                logo = geodata["logo_azul"]
-                l_w = t_w * 0.15
-                aspect = logo.shape[0] / logo.shape[1]
-                l_h = l_w * aspect
-                ax.imshow(logo, extent=[t_maxx - l_w - t_w*0.02, t_maxx - t_w*0.02, t_miny + t_h*0.02, t_miny + t_h*0.02 + l_h], 
-                          aspect='auto', zorder=15)
+                # 1. Definir el tamaño del logo relativo al ancho del mapa
+                map_width = total_maxx - total_minx
+                logo_width = map_width * 0.15  # El logo ocupará el 15% del ancho del mapa
+            
+                # 2. Calcular la altura del logo para mantener su proporción original
+                aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1] # alto / ancho en píxeles
+                logo_height = logo_width * aspect_ratio
+            
+                # 3. Definir el margen desde los bordes del mapa
+                margin_x = map_width * 0.02 # 2% de margen horizontal
+                margin_y = (total_maxy - total_miny) * 0.02 # 2% de margen vertical
+            
+                # 4. Calcular la coordenada de la esquina inferior-izquierda (x, y) del logo
+                # Para la X: Borde derecho del mapa - margen - ancho del logo
+                logo_x = total_maxx - margin_x - logo_width
+                # Para la Y: Borde inferior del mapa + margen
+                logo_y = total_miny + margin_y
+            
+                # 5. Dibujar el logo en la posición calculada
+                ax.imshow(geodata["logo"], 
+                          extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height],
+                          aspect='auto', zorder=10) # Usar un zorder alto para que siempre esté encima
+            ax.grid(True, linestyle=':', alpha=0.6, color='black')
 
             # Guardar y enviar a Streamlit
             png_buf = io.BytesIO()
@@ -1302,6 +1403,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
