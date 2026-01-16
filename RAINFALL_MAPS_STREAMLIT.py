@@ -158,6 +158,12 @@ if 'log_messages' not in st.session_state:
 
 # Ahora el resto de la interfaz puede comenzar
 st.title("💧 Generador de Reportes Pluviales para León, Gto.")
+st.markdown("Bienvenido al Generador de Reportes Pluviales. Visualiza de forma rápida cómo se distribuyó la lluvia más reciente en todo el municipio de León.")
+st.caption("""
+**Fuentes de Datos:** Este reporte se genera utilizando datos de acceso público.
+- **SAPAL:** Extraído de [sapal.gob.mx/estaciones-metereologicas](https://www.sapal.gob.mx/estaciones-metereologicas)
+- **CONAGUA:** Extraído de [sih.conagua.gob.mx/basedatos/climas/](https://sih.conagua.gob.mx/basedatos/climas/)
+""")
 # --- FUNCIONES CORE ---
 def add_north_arrow(ax, x=0.92, y=0.92, size=0.04, text_size=10):
     ns_poly = Polygon([[x, y + size], [x + size*0.2, y], [x, y - size], [x - size*0.2, y]], facecolor='black', edgecolor='black', transform=ax.transAxes)
@@ -577,15 +583,7 @@ def reset_analysis():
 # --- LÓGICA DE INTERFAZ REESTRUCTURADA CON DOS COLUMNAS ---
 
 # Función para no repetir la información de la barra lateral
-def display_sidebar_info():
-    """Muestra la información estática en la columna izquierda."""
-    st.markdown("Bienvenido al Generador de Reportes Pluviales. Visualiza de forma rápida cómo se distribuyó la lluvia más reciente en todo el municipio de León.")
-    st.caption("""
-    **Fuentes de Datos:** Este reporte se genera utilizando datos de acceso público.
-    - **SAPAL:** Extraído de [sapal.gob.mx/estaciones-metereologicas](https://www.sapal.gob.mx/estaciones-metereologicas)
-    - **CONAGUA:** Extraído de [sih.conagua.gob.mx/basedatos/climas/](https://sih.conagua.gob.mx/basedatos/climas/)
-    """)
-    st.divider()
+
 
 # Definimos las columnas fuera del if/else para que existan en ambos estados
 col_info, col_mapa = st.columns([2, 3]) # Columna izquierda más angosta (ratio 2:3)
@@ -645,7 +643,7 @@ if st.session_state.map_generated:
 else:
     # --- VISTA DE CONFIGURACIÓN Y PROCESAMIENTO ---
     with col_info:
-        display_sidebar_info()
+        
         st.header("1. Selecciona el tipo de reporte")
         report_option = st.radio("Elige las estaciones a incluir:", ('Solo Estaciones SAPAL', 'SAPAL + CONAGUA (Recomendado)'), index=1, key="report_option", disabled=(st.session_state.processing_state == 'processing'))
         st.info("Añadir las estaciones de CONAGUA mejora la precisión del mapa.")
@@ -1274,6 +1272,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
