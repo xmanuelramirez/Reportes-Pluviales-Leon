@@ -796,91 +796,111 @@ else:
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
 
-            # A. PREPARACIÓN DE DATOS (IMPORTANTE: APLICAR CUMSUM)
-            # Creamos una copia de los datos para no alterar el Excel
-            df_plot = df_hist.copy()
-            
-            # Años a graficar
-            col_2026 = str(ano_act)
-            col_2025 = str(ano_act - 1)
-            col_2024 = str(ano_act - 2)
+            # --- BARRAS CON DEGRADADO HORIZONTAL MARCADO (CLARO A OSCURO + TRANSPARENCIA) ---
+            # Escala de azules: Desde Cian claro transparente hasta Azul Medianoche casi sólido
+            colors_bars = [
+                'rgba(173, 216, 230, 0.2)', 'rgba(135, 206, 250, 0.3)', 'rgba(0, 191, 255, 0.4)',
+                'rgba(30, 144, 255, 0.5)', 'rgba(0, 123, 255, 0.6)', 'rgba(0, 105, 217, 0.7)',
+                'rgba(0, 86, 179, 0.75)', 'rgba(0, 68, 140, 0.8)', 'rgba(0, 51, 102, 0.85)',
+                'rgba(0, 38, 77, 0.9)', 'rgba(0, 26, 51, 0.95)', 'rgba(0, 13, 26, 1.0)'
+            ]
 
-            # --- BARRAS (ACUMULADO 2026) ---
-            # El cumsum() hace que la barra de febrero sea (Ene + Feb)
-            y_2026_acum = df_plot[col_2026].fillna(0).cumsum()
+            y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             
             fig_p.add_trace(go.Bar(
-                x=meses_labels, y=y_2026_acum, 
-                name=f"Acumulado {col_2026}",
-                marker=dict(color='rgba(13, 106, 183, 0.4)', line=dict(color='#0D6AB7', width=1)),
+                x=meses_labels, y=y_actual_acum, 
+                name=f"Acumulado {ano_act}",
+                marker=dict(
+                    color=colors_bars, 
+                    line=dict(color='rgba(255,255,255,0.3)', width=1)
+                ),
                 hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
             # --- CONFIGURACIÓN DE LÍNEAS NEÓN ---
             # Definimos qué años queremos ver y sus estilos
-            line_configs = [
-                {'col': col_2026, 'color': '#FFFF00', 'name': f'CURVA {col_2026}', 'dash': 'solid', 'marker': 'circle'},
-                {'col': col_2025, 'color': '#39FF14', 'name': f'AÑO {col_2025}', 'dash': 'solid', 'marker': 'square'},
-                {'col': col_2024, 'color': '#FF00FF', 'name': f'AÑO {col_2024}', 'dash': 'solid', 'marker': 'diamond'},
-                {'col': label_media, 'color': '#FF5F1F', 'name': label_media, 'dash': 'dash', 'marker': 'star'}
+            configs = [
+                {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
+                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
+                {'c': str(ano_act-2), 'color': '#FF00FF', 'shadow': '#4D004D', 'name': str(ano_act-2), 'sym': 'diamond'}, 
+                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'} 
             ]
 
-            for lc in line_configs:
-                if lc['col'] in df_plot.columns:
-                    # Calculamos el acumulado para la línea
-                    # Para la MEDIA, si ya es un valor acumulado en tu Excel no necesita cumsum, 
-                    # pero normalmente son valores mensuales, así que aplicamos cumsum a todo.
-                    y_values = df_plot[lc['col']].fillna(0).cumsum()
+            for i, lc in enumerate(configs):
+                if lc['c'] in df_hist.columns:
+                    y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
                     
-                    # Si es el año actual, solo graficamos hasta el mes en curso
-                    limit = mes_idx + 1 if lc['col'] == col_2026 else 12
-                    
-                    x_data = meses_labels[:limit]
-                    y_data = y_values[:limit]
+                    is_current = (lc['c'] == str(ano_act))
+                    limit = mes_idx + 1 if is_current else 12
+                    dx, dy = meses_labels[:limit], y_v[:limit]
+                    last_x = dx[-1]
+                    last_y = dy.iloc[-1]
 
-                    # 1. SOMBRA DE LA LÍNEA (Efecto Resplandor)
+                    # 1. SOMBRA
                     fig_p.add_trace(go.Scatter(
-                        x=x_data, y=y_data, mode='lines',
-                        line=dict(color=lc['color'], width=6, shape='spline', smoothing=1.3),
-                        opacity=0.2, showlegend=False, hoverinfo='skip'
+                        x=dx, y=dy, mode='lines',
+                        line=dict(color=lc['shadow'], width=5, shape='spline', smoothing=1.3),
+                        opacity=0.4, showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
                     ))
-
-                    # 2. LÍNEA PRINCIPAL
                     fig_p.add_trace(go.Scatter(
-                        x=x_data, y=y_data, mode='lines+markers', name=lc['name'],
-                        line=dict(color=lc['color'], width=3, dash=lc['dash'], shape='spline', smoothing=1.3),
-                        marker=dict(size=10, symbol=lc['marker'], line=dict(color='white', width=1)),
+                        x=dx, y=dy, mode='lines+markers', name=lc['name'],
+                        legendgroup=lc['name'],
+                        line=dict(color=lc['color'], width=3, shape='spline', smoothing=1.3, 
+                                  dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
+                        marker=dict(size=10, symbol=lc['sym'], line=dict(color='white', width=1.5)),
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
+                    # 3. CALLOUTS CON LÍNEAS DE REFERENCIA (LÍNEAS BLANCAS)
+                    if is_current:
+                        # VERTICAL (Año en curso): Línea hacia arriba
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x, last_x], y=[last_y, last_y + 60],
+                            mode='lines+text',
+                            text=["", f"<b>{last_y:.1f}</b>"],
+                            textposition="top center",
+                            textfont=dict(color='white', size=14),
+                            line=dict(color='white', width=1.5),
+                            showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                        ))
+                    else:
+                        # HORIZONTAL (Años terminados): Línea hacia la derecha fuera de las barras
+                        # Desplazamos los textos verticalmente un poco entre ellos para que no se encimen
+                        y_offset = last_y + (i * 5) 
+                        
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x, last_x], 
+                            y=[y_offset, y_offset],
+                            mode='markers+text',
+                            # Usamos espacios y un guion largo para simular la línea horizontal
+                            text=[f"  —  <b>{last_y:.1f}</b>  "],
+                            textposition="middle right",
+                            textfont=dict(color='white', size=13),
+                            marker=dict(opacity=0),
+                            showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                        ))
 
-                    # 3. CALLOUT (VALOR FINAL)
-                    last_val = y_data.iloc[-1]
-                    fig_p.add_trace(go.Scatter(
-                        x=[x_data[-1]], y=[last_val],
-                        mode='markers+text',
-                        text=[f"  <b>{last_val:.1f}</b>"],
-                        textposition="middle right",
-                        textfont=dict(color=lc['color'], size=13),
-                        marker=dict(opacity=0),
-                        showlegend=False, hoverinfo='skip'
-                    ))
+                   
+                  
 
             # --- DISEÑO DEL LAYOUT ---
             fig_p.update_layout(
-                height=850, margin=dict(b=120, l=10, r=100, t=50),
-                plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+                height=870, 
+                margin=dict(b=120, l=20, r=150, t=20), # Margen derecho extra amplio (150)
+                plot_bgcolor='rgba(0,0,0,0)', 
+                paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(
                     tickangle=-45, showgrid=False, 
-                    tickfont=dict(color="white", size=11),
-                    range=[-0.5, 12.5] 
+                    tickfont=dict(family="Arial Black", size=10, color="white"),
+                    showline=True, linecolor='white',
+                    range=[-0.5, 12.5] # Extendemos el rango para que los callouts no se corten
                 ),
                 yaxis=dict(
-                    showgrid=True, gridcolor='rgba(255,255,255,0.1)', 
-                    showticklabels=False, zeroline=False
+                    dtick=100, showgrid=True, gridcolor='rgba(255,255,255,0.15)', 
+                    griddash='dash', layer='below traces', showticklabels=False, zeroline=False
                 ),
                 legend=dict(
-                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5,
-                    font=dict(color="white", size=12), bgcolor='rgba(0,0,0,0)'
+                    orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, 
+                    font=dict(size=12, color="white"), bgcolor="rgba(0,0,0,0.5)"
                 )
             )
             st.session_state.fig_plotly = fig_p
@@ -1147,6 +1167,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
