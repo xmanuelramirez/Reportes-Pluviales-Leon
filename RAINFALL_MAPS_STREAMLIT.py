@@ -356,14 +356,13 @@ import re
 # Asegúrate de que estas importaciones estén al principio de tu script
 
 import time # Añade esta si no la tienes
-
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Versión 16.0 - Optimizada para GitHub y Streamlit Cloud.
-    Extrae datos de la estructura 'items' y normaliza nombres.
+    Versión para GitHub/Streamlit Cloud - API REST Directa.
+    Sin dependencias de navegadores.
     """
     results = []
-    log_messages.append("--- Extrayendo Datos en Tiempo Real (API REST) ---")
+    log_messages.append("--- Extrayendo Datos de SAPAL (API REST) ---")
     log_container.markdown("\n\n".join(log_messages))
 
     url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
@@ -375,7 +374,6 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
     }
 
     try:
-        # Petición al servidor
         response = session.get(url_lista, headers=headers, verify=False, timeout=20)
         response.raise_for_status()
         raw_data = response.json()
@@ -386,19 +384,23 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
             return pd.DataFrame()
 
         for st_id, info in items.items():
-            # 1. Extraer nombre tal cual viene en la API
+            # 1. Nombre original
             api_name_raw = info.get('nombre', '').strip()
             
-            # 2. Extraer lluvia acumulada anual
+            # 2. Lluvia Acumulada Anual (Dato directo de SAPAL)
             lluvia_val = info.get('precipitacionAcumuladaAnual1', 0)
             try:
                 lluvia_val = float(str(lluvia_val).replace(',', ''))
             except:
                 lluvia_val = 0.0
 
-            # 3. NORMALIZACIÓN (Aquí es donde se hace el Match con el Shapefile)
-            # Pasamos a MAYÚSCULAS para que sea más fácil el match
+            # 3. Normalización para Match con Shapefile
             nombre_para_mapa = api_name_raw.upper()
+
+            # --- CORRECCIONES DE NOMBRE ESPECÍFICAS ---
+            if "MORELOS" in nombre_para_mapa: nombre_para_mapa = "BLVD. MORELOS"
+            if "IBARRILLA" in nombre_para_mapa: nombre_para_mapa = "LOMAS DE IBARRILLA"
+            if "JEREZ" in nombre_para_mapa: nombre_para_mapa = "CERRITO DE JEREZ"
 
             results.append({
                 'Name': nombre_para_mapa,
@@ -414,6 +416,7 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
         log_container.markdown("\n\n".join(log_messages))
 
     return pd.DataFrame(results)
+
 
 def filter_outliers(gdf, column='P_mm'):
     Q1 = gdf[column].quantile(0.25); Q3 = gdf[column].quantile(0.75)
@@ -907,21 +910,49 @@ else:
             )
             st.session_state.fig_plotly = fig_p
             
-            # --- 4. LÓGICA ESPACIAL ORIGINAL (RESTAURADA) ---
-            total_df_con_na = total_df.copy(); st.session_state.total_df_con_na = total_df_con_na
-            if total_df.dropna(subset=['P_mm']).empty: st.error("No se encontraron datos válidos."); st.stop()
+            # --- 4. LÓGICA ESPACIAL REFORZADA (MATCH SEGURO) ---
+            total_df_con_na = total_df.copy()
+            st.session_state.total_df_con_na = total_df_con_na
             
-            updated_stations_gdf = stations_gdf.merge(total_df, on=['Name', 'ENTIDAD'], how='inner')
-            if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf.rename(columns={'P_mm_y': 'P_mm'}, inplace=True)
-            stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
-            if not stations_filtered_gdf.empty: stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
-            else: outliers_df = pd.DataFrame()
+            if total_df.dropna(subset=['P_mm']).empty: 
+                st.error("No se encontraron datos válidos.")
+                st.stop()
+            
+            # A. Limpieza profunda antes del Merge (Evita que el mapa salga con 9 estaciones)
+            stations_gdf_clean = geodata['stations'].copy()
+            stations_gdf_clean['Name'] = stations_gdf_clean['Name'].str.upper().str.strip()
+            stations_gdf_clean['ENTIDAD'] = stations_gdf_clean['ENTIDAD'].str.upper().str.strip()
+            
+            total_df_clean = total_df.copy()
+            total_df_clean['Name'] = total_df_clean['Name'].str.upper().str.strip()
+            total_df_clean['ENTIDAD'] = total_df_clean['ENTIDAD'].str.upper().str.strip()
 
+            # B. Vinculación (Merge)
+            updated_stations_gdf = stations_gdf_clean.merge(total_df_clean, on=['Name', 'ENTIDAD'], how='inner')
+            
+            # C. Corrección de columna P_mm
+            if 'P_mm_y' in updated_stations_gdf.columns:
+                updated_stations_gdf['P_mm'] = updated_stations_gdf['P_mm_y']
+            
+            stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
+            
+            # D. Filtrado de Outliers (Aseguramos que no borre los 0.0 de SAPAL)
+            if not stations_filtered_gdf.empty:
+                # Si notas que desaparecen estaciones, puedes comentar la línea de filter_outliers
+                stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
+            else:
+                outliers_df = pd.DataFrame()
+
+            # Guardar en estado de sesión
             st.session_state.stations_filtered_gdf = stations_filtered_gdf
             st.session_state.outliers_df = outliers_df
             
-            if len(stations_filtered_gdf) < 5: interpolation_results, metrics_df = None, None
-            else: interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
+            # E. Interpolación
+            num_final = len(stations_filtered_gdf)
+            if num_final < 5:
+                interpolation_results, metrics_df = None, None
+            else:
+                interpolation_results, metrics_df = find_best_interpolation_model(stations_filtered_gdf, geodata['boundary'])
             
             st.session_state.interpolation_results = interpolation_results
             st.session_state.metrics_df = metrics_df
@@ -1145,6 +1176,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
