@@ -890,9 +890,13 @@ else:
                             ))
 
             fig_p.update_layout(
-                height=800, margin=dict(b=100, l=10, r=100, t=50),
+                height=800, margin=dict(b=100, l=10, r=120, t=50),
                 plot_bgcolor='white', paper_bgcolor='white',
-                xaxis=dict(tickangle=-45, showgrid=False, tickfont=dict(color="black", family="Arial Black"), showline=True, linecolor='black'),
+                xaxis=dict(
+                    tickangle=-45, showgrid=False, tickfont=dict(color="black", family="Arial Black"), 
+                    showline=True, linecolor='black',
+                    range=[-0.5, 12.5] # Da espacio a la derecha para el texto
+                ),
                 yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', griddash='dash', showticklabels=False, zeroline=False),
                 legend=dict(orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, font=dict(color="black", size=10), bgcolor="rgba(255,255,255,0.8)", bordercolor="black", borderwidth=1)
             )
@@ -1151,9 +1155,13 @@ else:
             st.session_state.figure = fig
             st.session_state.png_buffer = png_buf
             st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
-            
+
+            report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
+            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
             # Panel de estadísticas
             st.session_state.stats_panel_md = {
+
+                "header": stats_md, 
                 "desc_stats": s_f['P_mm'].describe().to_frame().T.rename(columns={'mean':'Promedio','max':'Máximo','min':'Mínimo'}),
                 "total_df_con_na": s_f[['Name', 'P_mm']].sort_values(by='P_mm', ascending=False)
             }
@@ -1427,6 +1435,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
