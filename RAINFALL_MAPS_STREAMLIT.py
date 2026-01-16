@@ -359,81 +359,85 @@ import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Extrae datos de SAPAL. Versión 13.0 - API Nueva con mapeo de nombres refinado.
-    Utiliza la nueva API que acepta nombres, con una función interna que traduce
-    los nombres del shapefile a los nombres cortos que la API espera.
+    Extrae datos de SAPAL. Versión final estable.
+    Usa getMapStationList para obtener todas las estaciones y getHistory para la lluvia.
     """
     results = []
-    log_messages.append("--- Extracción automática de SAPAL (si la API lo permite) ---")
+    log_messages.append("--- Consultando catálogo oficial de estaciones SAPAL... ---")
     log_container.markdown("\n\n".join(log_messages))
 
-    # Lista actualizada de nombres que reconoce el nuevo endpoint (según Postman)
-    estaciones_publicas = [
-        "Amalias", "Centro", "Explora", "P Ibarrilla", "Santa Rosa", "Blvd La Luz",
-        "Cervantes", "Chapalita", "Insurgentes", "Pta Sta Ana", "Sapamilpa", 
-        "Torres Landa", "Morelos", "Hidalgo", "Villas de San Juan"
-    ]
-
-    # Nueva URL del servicio del Portal SAPAL
-    api_url = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
+    # --- PASO A: OBTENER LA LISTA DINÁMICA ---
+    url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
+    url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0",
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
-    session = requests.Session()
-    session.get("https://www.sapal.gob.mx/estaciones-meteorologicas", headers=headers, timeout=15)
 
-    results = []
-    for api_station_name in estaciones_publicas:
-        # Formato de fecha según Postman: DD-MM-YYYY
-        report_date_str = report_date.strftime('%d-%m-%Y')
+    try:
+        resp_lista = requests.get(url_lista, headers=headers, verify=False, timeout=15)
+        resp_lista.raise_for_status()
+        lista_data = resp_lista.json()
         
-        # El JSON de Postman usa "period": "M" para historial o "D" para diario
-        # Ajustamos al formato exacto del nuevo endpoint
+        # Extraemos nombres (usualmente vienen en la llave 'data')
+        estaciones_api = [est.get('name') for est in lista_data.get('data', []) if est.get('name')]
+        
+        if not estaciones_api:
+            estaciones_api = ["Amalias", "Centro", "Explora", "Torres Landa", "Hidalgo"]
+            log_messages.append("⚠️ Usando lista de respaldo.")
+        else:
+            log_messages.append(f"✅ Se encontraron {len(estaciones_api)} estaciones.")
+            
+    except Exception as e:
+        log_messages.append(f"❌ Error catálogo: {e}")
+        return pd.DataFrame()
+
+    # --- PASO B: CONSULTAR HISTORIAL ---
+    for api_name in estaciones_api:
+        fecha_inicio = f"01-01-{report_date.year}"
+        fecha_fin = report_date.strftime('%d-%m-%Y')
+        
         payload = {
-            "location": api_station_name,
-            "startDate": report_date_str,
-            "endDate": report_date_str,
-            "period": "D"  # Probamos con "D" para el dato del día
+            "location": api_name,
+            "startDate": fecha_inicio,
+            "endDate": fecha_fin,
+            "period": "M" # 'M' para acumulado mensual/anual
         }
 
         try:
-            # verify=False ayuda si el servidor de SAPAL tiene certificados SSL antiguos (común en gobierno)
-            response = requests.post(api_url, headers=headers, json=payload, timeout=20, verify=False)
+            # CORRECCIÓN: Usar url_historial y api_name
+            response = requests.post(url_historial, headers=headers, json=payload, timeout=20, verify=False)
             response.raise_for_status()
             data = response.json()
             
-            # Según la estructura típica de estas APIs nuevas de SAPAL:
-            # Los datos suelen venir en una lista llamada 'data' o 'result'
             registros = data.get("data", []) or data.get("registro", [])
             
             if not registros:
-                log_messages.append(f"⚠️ SAPAL {api_station_name}: Sin datos en esta fecha.")
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
+                # Normalizamos el nombre a mayúsculas para que coincida con el SHP
+                results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
                 continue
 
-            # Extraemos el valor de precipitación (ajusta el nombre si el JSON dice 'valor' o 'precipitacion')
-            # Usualmente es el último registro del día
             df_temp = pd.DataFrame(registros)
-            
-            # Buscamos la columna de lluvia (en las nuevas APIs suele llamarse 'value' o 'precipitacion')
             col_lluvia = next((c for c in df_temp.columns if 'precip' in c.lower() or 'value' in c.lower()), None)
             
             if col_lluvia:
-                valor_lluvia = pd.to_numeric(df_temp[col_lluvia], errors='coerce').sum()
-                log_messages.append(f"✅ SAPAL {api_station_name}: {valor_lluvia} mm")
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': valor_lluvia})
+                # Sumamos todo el historial recibido para tener el ACUMULADO ANUAL
+                valor_total = pd.to_numeric(df_temp[col_lluvia], errors='coerce').sum()
+                log_messages.append(f"✅ SAPAL {api_name}: {valor_total:.1f} mm")
+                results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': valor_total})
             else:
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
+                results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
 
         except Exception as e:
-            log_messages.append(f"❌ SAPAL {api_station_name}: Error de conexión.")
-            results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            log_messages.append(f"❌ SAPAL {api_name}: Error de conexión.")
+            results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+        
         finally:
             log_container.markdown("\n\n".join(log_messages))
-            time.sleep(0.2)
+            time.sleep(0.1) # Un poco más rápido para no desesperar al usuario
+
     return pd.DataFrame(results)
 
 def filter_outliers(gdf, column='P_mm'):
@@ -1166,6 +1170,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
