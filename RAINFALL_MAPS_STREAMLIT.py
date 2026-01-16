@@ -84,29 +84,47 @@ os.environ['PROJ_LIB'] = pyproj.datadir.get_data_dir()
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON EFECTO ORBITAL) ---
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON SPINNER) ---
 # --- INICIO DEL BLOQUE DE ESTILOS PERSONALIZADOS (CON BARRA DE PROGRESO) ---
+# --- INICIO DEL BLOQUE DE ESTILOS LUZ (BLANCO Y NEGRO) ---
 st.markdown("""
 <style>
-/* --- ESTILOS PARA BOTONES Y RADIO (sin cambios) --- */
-div[data-testid="stButton"] > button { background-color: #0D6AB7; color: white; border: 1px solid #0D6AB7; }
-div[data-testid="stButton"] > button:hover { background-color: #0A5591; color: white; border: 1px solid #0A5591; }
-div[data-testid="stRadio"] input:checked + div > span { background-color: #0D6AB7 !important; border-color: #0D6AB7 !important; }
+/* Fondo general y textos */
+.stApp {
+    background-color: #FFFFFF;
+    color: #000000;
+}
 
-/* --- NUEVO ESTILO PARA LA BARRA DE PROGRESO CIRCULAR --- */
+/* Forzar títulos y textos a negro */
+h1, h2, h3, p, span, label {
+    color: #000000 !important;
+}
+
+/* --- ESTILOS PARA BOTONES --- */
+div[data-testid="stButton"] > button {
+    background-color: #0D6AB7;
+    color: white !important;
+    border: 1px solid #0D6AB7;
+}
+
+/* --- BARRA DE PROGRESO CIRCULAR (FONDO BLANCO) --- */
 .center-container { display: flex; justify-content: center; align-items: center; height: 400px; }
 .progress-circle-container { position: relative; width: 120px; height: 120px; }
 .progress-circle {
     width: 120px; height: 120px; border-radius: 50%;
-    /* El truco: un gradiente cónico que se actualiza con una variable CSS */
-    background: conic-gradient(#0D6AB7 var(--progress), #444 0);
+    background: conic-gradient(#0D6AB7 var(--progress), #E0E0E0 0);
     display: flex; justify-content: center; align-items: center;
-    transition: background 0.2s; /* Transición suave */
+    transition: background 0.2s;
 }
 .progress-circle-inner {
     width: 100px; height: 100px; border-radius: 50%;
-    background: #0E1117; /* Mismo color que el fondo de la app */
+    background: #FFFFFF; /* FONDO BLANCO PARA EL CÍRCULO */
     display: flex; justify-content: center; align-items: center;
 }
-.progress-text { font-size: 1.8em; font-weight: bold; color: #FAFAFA; }
+.progress-text { font-size: 1.8em; font-weight: bold; color: #000000; }
+
+/* Ajuste de tablas para que se vean bien en blanco */
+div[data-testid="stDataFrame"] {
+    border: 1px solid #E0E0E0;
+}
 </style>
 """, unsafe_allow_html=True)
 # --- FIN DEL BLOQUE DE ESTILOS ---
@@ -1256,6 +1274,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
