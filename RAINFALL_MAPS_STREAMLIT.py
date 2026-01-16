@@ -840,47 +840,54 @@ else:
                 hovertemplate='Total: %{y:.1f} mm<extra></extra>'
             ))
 
+            # --- 3. CONFIGURACIÓN DE LÍNEAS (Asegúrate de queconfigs esté así) ---
             configs = [
-                {'c':str(ano_act),'color':'#FFFF00','name':f'CURVA {ano_act}','sym':'circle'},
-                {'c':str(ano_act-1),'color':'#39FF14','name':str(ano_act-1),'sym':'square'},
-                {'c':str(ano_act-2),'color':'#FF00FF','name':str(ano_act-2),'sym':'diamond'},
-                {'c':label_media,'color':'#FF5F1F','name':label_media,'sym':'star'}
+                {'c':str(ano_act),   'color':'#FFFF00', 'name':f'CURVA {ano_act}', 'sym':'circle'},
+                {'c':str(ano_act-1), 'color':'#39FF14', 'name':str(ano_act-1),      'sym':'square'},
+                {'c':str(ano_act-2), 'color':'#FF00FF', 'name':str(ano_act-2),      'sym':'diamond'},
+                {'c':label_media,    'color':'#FF5F1F', 'name':label_media,        'sym':'star'}
             ]
             
+            # --- EL BUCLE FOR CORREGIDO ---
             for i, lc in enumerate(configs):
                 if lc['c'] in df_hist.columns:
-                    y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
-                    limit = mes_idx + 1 if lc['c'] == str(ano_act) else 12
-                    dx, dy = meses_labels[:limit], y_v[:limit]
-                    last_x, last_y = dx[-1], dy.iloc[-1]
+                    # 1. DEFINIR is_current para evitar el NameError
+                    is_current = (lc['c'] == str(ano_act))
                     
-                    fig_p.add_trace(go.Scatter(
-                        x=dx, y=dy, mode='lines+markers', name=lc['name'], 
-                        line=dict(color=lc['color'], width=3, dash='dash' if 'MEDIA' in lc['name'] else 'solid', shape='spline'), 
-                        marker=dict(size=8, symbol=lc['sym'], line=dict(color='black', width=1)),
-                        hovertemplate='%{y:.1f} mm<extra></extra>'
-                    ))
-                    # 3. LÓGICA DE CALLOUTS (VERTICAL VS HORIZONTAL)
-                    if is_current:
-                        # Callout VERTICAL para el año actual (Hacia arriba)
+                    y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
+                    limit = mes_idx + 1 if is_current else 12
+                    dx, dy = meses_labels[:limit], y_v[:limit]
+                    
+                    # Verificamos que existan datos antes de sacar el último valor
+                    if len(dy) > 0:
+                        last_x, last_y = dx[-1], dy.iloc[-1]
+                        
                         fig_p.add_trace(go.Scatter(
-                            x=[last_x, last_x], y=[last_y, last_y + 40],
-                            mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"],
-                            textposition="top center", textfont=dict(color='black', size=13),
-                            line=dict(color='black', width=1.5), showlegend=False, hoverinfo='skip'
+                            x=dx, y=dy, mode='lines+markers', name=lc['name'], 
+                            line=dict(color=lc['color'], width=3, dash='dash' if 'MEDIA' in lc['name'] else 'solid', shape='spline'), 
+                            marker=dict(size=8, symbol=lc['sym'], line=dict(color='black', width=1)),
+                            hovertemplate='%{y:.1f} mm<extra></extra>'
                         ))
-                    else:
-                        # Callout HORIZONTAL para años anteriores (Hacia la derecha)
-                        # Usamos un pequeño desfase para que los textos no se encimen
-                        y_pos_text = last_y + (i * 2) 
-                        fig_p.add_trace(go.Scatter(
-                            x=[last_x], y=[y_pos_text],
-                            mode='markers+text', 
-                            # El guion largo "—" simula la línea horizontal del callout
-                            text=[f"  <b>—  {last_y:.1f}</b>"], 
-                            textposition="middle right", textfont=dict(color='black', size=12),
-                            marker=dict(opacity=0), showlegend=False, hoverinfo='skip'
-                        ))
+
+                        # 3. LÓGICA DE CALLOUTS (YA NO FALLARÁ)
+                        if is_current:
+                            # Callout VERTICAL para el año actual (Hacia arriba)
+                            fig_p.add_trace(go.Scatter(
+                                x=[last_x, last_x], y=[last_y, last_y + 40],
+                                mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"],
+                                textposition="top center", textfont=dict(color='black', size=13),
+                                line=dict(color='black', width=1.5), showlegend=False, hoverinfo='skip'
+                            ))
+                        else:
+                            # Callout HORIZONTAL para años anteriores (Hacia la derecha)
+                            y_pos_text = last_y + (i * 2) 
+                            fig_p.add_trace(go.Scatter(
+                                x=[last_x], y=[y_pos_text],
+                                mode='markers+text', 
+                                text=[f"  <b>—  {last_y:.1f}</b>"], 
+                                textposition="middle right", textfont=dict(color='black', size=12),
+                                marker=dict(opacity=0), showlegend=False, hoverinfo='skip'
+                            ))
 
             fig_p.update_layout(
                 height=800, margin=dict(b=100, l=10, r=100, t=50),
@@ -1420,6 +1427,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
