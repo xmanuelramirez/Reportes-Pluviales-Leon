@@ -788,39 +788,31 @@ else:
             
             sapal_only = total_df[total_df['ENTIDAD'] == 'SAPAL'].copy()
             sapal_only['Name_Norm'] = sapal_only['Name'].str.upper()
-            
             suma_productos = 0
             for st_name, peso in pesos_dict.items():
                 match = sapal_only[sapal_only['Name_Norm'].str.contains(st_name.split()[0])]
                 if not match.empty:
-                    precip = match['P_mm'].values[0] # Este ya es el acumulado anual de la estación
-                    if pd.notna(precip): 
-                        suma_productos += (precip * peso)
+                    precip = match['P_mm'].values[0] # Este es el Acumulado Anual de la API
+                    if pd.notna(precip): suma_productos += (precip * peso)
             
-            # Este es el PONDERADO ACUMULADO ANUAL de la ciudad hasta la fecha elegida
-            ponderado_anual_hoy = suma_productos / 702.215
+            ponderado_anual_api = suma_productos / 702.215
 
-            # --- 2. ACTUALIZACIÓN DE EXCEL (LÓGICA ANTI-DUPLICADO) ---
+            # --- 2. ACTUALIZACIÓN DE EXCEL Y MEDIA DINÁMICA ---
             df_hist = pd.read_excel(EXCEL_PATH)
             df_hist.columns = [str(c).strip() for c in df_hist.columns]
             col_media_base = next((c for c in df_hist.columns if "MEDIA LEÓN" in c.upper() and "2011-2023" in c), None)
             
             if str(ano_act) not in df_hist.columns:
                 df_hist[str(ano_act)] = np.nan
+
+            # LÓGICA ANTI-DUPLICADO:
+            # Para que el .cumsum() no explote, guardamos en el Excel: (Acumulado API - Suma meses anteriores del Excel)
+            acum_anterior_excel = df_hist[str(ano_act)].iloc[:mes_idx].sum()
+            ponderado_mensual_real = ponderado_anual_api - acum_anterior_excel
             
-            # CALCULAR EL VALOR MENSUAL (Para no inflar la gráfica)
-            # Si es Enero, el mensual es igual al anual.
-            # Si es otro mes, restamos la suma de los meses anteriores en el Excel.
-            if mes_idx == 0:
-                valor_a_guardar = ponderado_anual_hoy
-            else:
-                acumulado_anterior = df_hist[str(ano_act)].iloc[:mes_idx].sum()
-                valor_a_guardar = ponderado_anual_hoy - acumulado_anterior
+            df_hist.loc[mes_idx, str(ano_act)] = ponderado_mensual_real
 
-            # Guardamos solo el incremento mensual en la celda
-            df_hist.loc[mes_idx, str(ano_act)] = valor_a_guardar
-
-            # Recalcular Media Dinámica
+            # Cálculo de Media Dinámica (TU LÓGICA ORIGINAL)
             anos_extra = [c for c in df_hist.columns if c.isdigit() and int(c) > 2023]
             u_completo = 2023
             for a in anos_extra:
@@ -836,58 +828,101 @@ else:
             cols_old = [c for c in df_hist.columns if "MEDIA" in c.upper() and c != col_media_base]
             df_hist.drop(columns=cols_old, inplace=True)
             df_hist[label_media] = df_hist.apply(calc_media_real, axis=1)
-            
             df_hist.to_excel(EXCEL_PATH, index=False)
 
-            # --- 3. GRÁFICA PLOTLY (CURVAS ACUMULADAS REALES) ---
+            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (RESTAURANDO ESTÉTICA TOTAL) ---
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
             
-            # Años a comparar
-            anos_grafica = [str(ano_act), str(ano_act-1), str(ano_act-2), label_media]
-            colors = ['#FFFF00', '#39FF14', '#FF00FF', '#FF5F1F']
-            symbols = ['circle', 'square', 'diamond', 'star']
-
-            # Barras: Acumulado Año Actual
-            y_barras = df_hist[str(ano_act)].fillna(0).cumsum()
+            # --- BARRAS CON DEGRADADO ORIGINAL ---
+            colors_bars = [
+                'rgba(173, 216, 230, 0.2)', 'rgba(135, 206, 250, 0.3)', 'rgba(0, 191, 255, 0.4)',
+                'rgba(30, 144, 255, 0.5)', 'rgba(0, 123, 255, 0.6)', 'rgba(0, 105, 217, 0.7)',
+                'rgba(0, 86, 179, 0.75)', 'rgba(0, 68, 140, 0.8)', 'rgba(0, 51, 102, 0.85)',
+                'rgba(0, 38, 77, 0.9)', 'rgba(0, 26, 51, 0.95)', 'rgba(0, 13, 26, 1.0)'
+            ]
+            
+            y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
-                x=meses_labels, y=y_barras, name=f"Acumulado {ano_act}",
-                marker=dict(color='rgba(13, 106, 183, 0.4)', line=dict(color='#0D6AB7', width=1)),
-                hovertemplate='Total: %{y:.1f} mm<extra></extra>'
+                x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}",
+                marker=dict(color=colors_bars, line=dict(color='rgba(255,255,255,0.3)', width=1)),
+                hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            for i, col in enumerate(anos_grafica):
-                if col in df_hist.columns:
-                    # Aplicamos cumsum() a los valores mensuales del Excel
-                    y_linea = df_hist[col].fillna(0).cumsum()
-                    limit = mes_idx + 1 if col == str(ano_act) else 12
-                    
-                    dx, dy = meses_labels[:limit], y_linea[:limit]
-                    
-                    # Línea con resplandor
+            # --- CURVAS NEÓN Y SOMBRAS ORIGINALES ---
+            configs = [
+                {'c': str(ano_act), 'color': '#FFFF00', 'shadow': '#666600', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
+                {'c': str(ano_act-1), 'color': '#39FF14', 'shadow': '#124008', 'name': str(ano_act-1), 'sym': 'square'}, 
+                {'c': str(ano_act-2), 'color': '#FF00FF', 'shadow': '#4D004D', 'name': str(ano_act-2), 'sym': 'diamond'}, 
+                {'c': label_media, 'color': '#FF5F1F', 'shadow': '#66260C', 'name': label_media, 'sym': 'star'} 
+            ]
+
+            for i, lc in enumerate(configs):
+                if lc['c'] in df_hist.columns:
+                    y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
+                    is_current = (lc['c'] == str(ano_act))
+                    limit = mes_idx + 1 if is_current else 12
+                    dx, dy = meses_labels[:limit], y_v[:limit]
+                    last_x, last_y = dx[-1], dy.iloc[-1]
+
+                    # 1. SOMBRA
                     fig_p.add_trace(go.Scatter(
-                        x=dx, y=dy, mode='lines+markers', name=col if 'MEDIA' in col else f"CURVA {col}",
-                        line=dict(color=colors[i], width=3, dash='dash' if 'MEDIA' in col else 'solid', shape='spline'),
-                        marker=dict(size=8, symbol=symbols[i], line=dict(color='white', width=1)),
+                        x=dx, y=dy, mode='lines',
+                        line=dict(color=lc['shadow'], width=5, shape='spline', smoothing=1.3),
+                        opacity=0.4, showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                    ))
+                    # 2. CURVA PRINCIPAL
+                    fig_p.add_trace(go.Scatter(
+                        x=dx, y=dy, mode='lines+markers', name=lc['name'],
+                        legendgroup=lc['name'],
+                        line=dict(color=lc['color'], width=3, shape='spline', smoothing=1.3, 
+                                  dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
+                        marker=dict(size=10, symbol=lc['sym'], line=dict(color='white', width=1.5)),
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
+                    
+                    # 3. CALLOUTS CON LÍNEAS BLANCAS ORIGINALES
+                    if is_current:
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x, last_x], y=[last_y, last_y + 60],
+                            mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"],
+                            textposition="top center", textfont=dict(color='white', size=14),
+                            line=dict(color='white', width=1.5),
+                            showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                        ))
+                    else:
+                        y_offset = last_y + (i * 5) 
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x, last_x], y=[y_offset, y_offset],
+                            mode='markers+text', text=[f"  —  <b>{last_y:.1f}</b>  "],
+                            textposition="middle right", textfont=dict(color='white', size=13),
+                            marker=dict(opacity=0), showlegend=False, legendgroup=lc['name'], hoverinfo='skip'
+                        ))
 
-                    # Callout al final de la curva
-                    last_val = dy.iloc[-1]
-                    fig_p.add_trace(go.Scatter(
-                        x=[dx[-1]], y=[last_val], mode='markers+text',
-                        text=[f" <b>{last_val:.1f}</b>"], textposition="middle right",
-                        textfont=dict(color=colors[i], size=13), showlegend=False, hoverinfo='skip'
-                    ))
-
+            # --- LAYOUT CON LEYENDA VERTICAL A LA IZQUIERDA ---
             fig_p.update_layout(
-                height=850, margin=dict(b=120, l=20, r=100, t=50),
+                height=870, margin=dict(b=120, l=20, r=150, t=20),
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(tickangle=-45, tickfont=dict(color="white"), showgrid=False, range=[-0.5, 12.5]),
-                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', showticklabels=False),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5, font=dict(color="white"))
+                xaxis=dict(
+                    tickangle=-45, showgrid=False, 
+                    tickfont=dict(family="Arial Black", size=10, color="white"),
+                    showline=True, linecolor='white', range=[-0.5, 12.5]
+                ),
+                yaxis=dict(
+                    dtick=100, showgrid=True, gridcolor='rgba(255,255,255,0.15)', 
+                    griddash='dash', layer='below traces', showticklabels=False, zeroline=False
+                ),
+                legend=dict(
+                    orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, 
+                    font=dict(size=12, color="white"), bgcolor="rgba(0,0,0,0.5)"
+                )
             )
             st.session_state.fig_plotly = fig_p
+            
+            # --- CONTINUAR CON ETAPA SIGUIENTE ---
+            st.session_state.progress_percent = 90
+            st.rerun()
+        
 
         
             
@@ -1153,6 +1188,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
