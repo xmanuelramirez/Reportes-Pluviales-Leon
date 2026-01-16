@@ -370,7 +370,7 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
         "Referer": "https://www.sapal.gob.mx/"
     }
 
-    # --- FLUJO A: TIEMPO REAL (TU CÓDIGO ORIGINAL) ---
+    # --- FLUJO A: TIEMPO REAL (TU CÓDIGO ORIGINAL INTACTO) ---
     if is_today:
         log_messages.append("--- Extrayendo Datos de SAPAL (API REST - Tiempo Real) ---")
         log_container.markdown("\n\n".join(log_messages))
@@ -379,55 +379,57 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
             response = session.get(url_lista, headers=headers, verify=False, timeout=20)
             raw_data = response.json()
             items = raw_data.get('items', {})
+            
             for st_id, info in items.items():
                 api_name = str(info.get('nombre', '')).upper().strip()
                 lluvia = info.get('precipitacionAcumuladaAnual1', 0)
-                try: lluvia = float(str(lluvia).replace(',', ''))
-                except: lluvia = 0.0
+                try: 
+                    lluvia = float(str(lluvia).replace(',', ''))
+                except: 
+                    lluvia = 0.0
+
                 results.append({'Name': api_name, 'ENTIDAD': 'SAPAL', 'P_mm': lluvia})
                 log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
                 log_container.markdown("\n\n".join(log_messages))
         except Exception as e:
-            log_messages.append(f"❌ Error API: {e}")
+            log_messages.append(f"❌ Error API Hoy: {e}")
             log_container.markdown("\n\n".join(log_messages))
 
-    # --- FLUJO B: FECHA MANUAL (SOLO DIAGNÓSTICO DE ESTRUCTURA) ---
+    # --- FLUJO B: FECHA MANUAL (IMPRESIÓN DE ESTRUCTURA) ---
     else:
-        st.warning(f"📅 Se detectó fecha manual: {report_date.strftime('%d-%m-%Y')}")
-        log_messages.append("--- [MODO DIAGNÓSTICO] Consultando getHistory ---")
+        log_messages.append(f"--- [MODO DIAGNÓSTICO] Obteniendo JSON de getHistory ---")
         log_container.markdown("\n\n".join(log_messages))
         
         url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
         
-        # Tomamos la primera estación del Shapefile para probar
-        test_station = stations[0]
-        
-        # Payload exacto según tu Postman
+        # Intentamos con una estación que sabemos que existe: "Amalias"
         payload = {
-            "location": test_station,
+            "location": "Amalias",
             "startDate": f"01-01-{report_date.year}",
             "endDate": report_date.strftime('%d-%m-%Y'),
             "period": "M" 
         }
         
         try:
-            # Hacemos la petición de prueba
             r = session.post(url_historial, headers=headers, json=payload, verify=False, timeout=20)
             
+            # FORZAR LA SALIDA EN PANTALLA (Aparecerá arriba de todo en tu Dashboard)
+            st.header("🕵️ ESTRUCTURA DEL HISTORIAL DETECTADA")
             if r.status_code == 200:
-                # AQUÍ SE IMPRIME LA ESTRUCTURA PARA QUE LA VEAS
-                st.write(f"### 🧪 Estructura JSON devuelta por getHistory para: {test_station}")
-                st.json(r.json())
-                st.info("Copia el contenido de arriba para ajustar la extracción del historial.")
+                data_json = r.json()
+                st.write("Copia este JSON completo y pégalo en el chat:")
+                st.json(data_json)
+                log_messages.append("✅ JSON histórico obtenido con éxito. Revisa el dashboard.")
             else:
-                st.error(f"El servidor respondió con error {r.status_code}")
-                st.write(r.text)
+                st.error(f"Error {r.status_code}: {r.text}")
                 
         except Exception as e:
-            st.error(f"Error de conexión al historial: {e}")
-            
-        # Devolvemos DataFrame vacío en modo diagnóstico para no romper el script
-        return pd.DataFrame(columns=['Name', 'ENTIDAD', 'P_mm'])
+            st.error(f"Fallo la conexión al historial: {e}")
+
+        # --- PARA QUE EL MAPA NO SALGA VACÍO MIENTRAS TANTO ---
+        # Llenamos con 0.0 todas las estaciones de tu Shapefile
+        for st_name in stations:
+            results.append({'Name': st_name.upper().strip(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
 
     return pd.DataFrame(results)
 
@@ -1198,6 +1200,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
