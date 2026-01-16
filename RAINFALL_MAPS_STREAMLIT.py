@@ -1099,7 +1099,7 @@ else:
                 logo_width = map_width * 0.15  # El logo ocupará el 15% del ancho del mapa
             
                 # 2. Calcular la altura del logo para mantener su proporción original
-                aspect_ratio = geodata["logo"].shape[0] / geodata["logo"].shape[1] # alto / ancho en píxeles
+                aspect_ratio = geodata["logo_azul"].shape[0] / geodata["logo_azul"].shape[1] # alto / ancho en píxeles
                 logo_height = logo_width * aspect_ratio
             
                 # 3. Definir el margen desde los bordes del mapa
@@ -1113,7 +1113,7 @@ else:
                 logo_y = total_miny + margin_y
             
                 # 5. Dibujar el logo en la posición calculada
-                ax.imshow(geodata["logo"], 
+                ax.imshow(geodata["logo_azul"], 
                           extent=[logo_x, logo_x + logo_width, logo_y, logo_y + logo_height],
                           aspect='auto', zorder=10) # Usar un zorder alto para que siempre esté encima
             ax.grid(True, linestyle=':', alpha=0.6, color='black')
@@ -1403,6 +1403,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
