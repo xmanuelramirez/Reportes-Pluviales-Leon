@@ -764,8 +764,6 @@ else:
             st.session_state.progress_percent = 60
             st.rerun()
 
-        
-        
         # ETAPA 3: Progreso 60% -> 90% (Cálculos, Excel, Gráfica e Interpolación)
         elif st.session_state.progress_percent == 60:
             # --- 0. VARIABLES BASE ---
@@ -808,6 +806,7 @@ else:
                 df_hist[str(ano_act)] = np.nan
 
             # LÓGICA ANTI-DUPLICADO (RESTAMOS LO ACUMULADO EN EL EXCEL)
+            # Solo guardamos la diferencia para que al sumar en la gráfica de el total correcto
             acum_anterior_excel = df_hist[str(ano_act)].iloc[:mes_idx].sum()
             ponderado_mensual_real = ponderado_anual_api - acum_anterior_excel
             df_hist.loc[mes_idx, str(ano_act)] = ponderado_mensual_real
@@ -829,30 +828,52 @@ else:
             df_hist[label_media] = df_hist.apply(calc_media_real, axis=1)
             df_hist.to_excel(EXCEL_PATH, index=False)
 
-            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (ESTÉTICA RESTAURADA) ---
+            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (VERSIÓN BLANCA / TEXTO NEGRO) ---
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
             
-            colors_bars = ['rgba(173,216,230,0.2)','rgba(135,206,250,0.3)','rgba(0,191,255,0.4)','rgba(30,144,255,0.5)','rgba(0,123,255,0.6)','rgba(0,105,217,0.7)','rgba(0,86,179,0.75)','rgba(0,68,140,0.8)','rgba(0,51,102,0.85)','rgba(0,38,77,0.9)','rgba(0,26,51,0.95)','rgba(0,13,26,1.0)']
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
-            fig_p.add_trace(go.Bar(x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}", marker=dict(color=colors_bars, line=dict(color='rgba(255,255,255,0.3)', width=1)), hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'))
+            fig_p.add_trace(go.Bar(
+                x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}", 
+                marker=dict(color=y_actual_acum, colorscale='Blues', line=dict(color='black', width=0.5)),
+                hovertemplate='Total: %{y:.1f} mm<extra></extra>'
+            ))
 
-            configs = [{'c':str(ano_act),'color':'#FFFF00','shadow':'#666600','name':f'CURVA {ano_act}','sym':'circle'},{'c':str(ano_act-1),'color':'#39FF14','shadow':'#124008','name':str(ano_act-1),'sym':'square'},{'c':str(ano_act-2),'color':'#FF00FF','shadow':'#4D004D','name':str(ano_act-2),'sym':'diamond'},{'c':label_media,'color':'#FF5F1F','shadow':'#66260C','name':label_media,'sym':'star'}]
+            configs = [
+                {'c':str(ano_act),'color':'#0070FF','name':f'CURVA {ano_act}','sym':'circle'},
+                {'c':str(ano_act-1),'color':'#39FF14','name':str(ano_act-1),'sym':'square'},
+                {'c':str(ano_act-2),'color':'#FF00FF','name':str(ano_act-2),'sym':'diamond'},
+                {'c':label_media,'color':'#FF5F1F','name':label_media,'sym':'star'}
+            ]
+            
             for i, lc in enumerate(configs):
                 if lc['c'] in df_hist.columns:
                     y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
                     limit = mes_idx + 1 if lc['c'] == str(ano_act) else 12
                     dx, dy = meses_labels[:limit], y_v[:limit]
                     last_x, last_y = dx[-1], dy.iloc[-1]
-                    fig_p.add_trace(go.Scatter(x=dx, y=dy, mode='lines', line=dict(color=lc['shadow'], width=5, shape='spline', smoothing=1.3), opacity=0.4, showlegend=False, hoverinfo='skip'))
-                    fig_p.add_trace(go.Scatter(x=dx, y=dy, mode='lines+markers', name=lc['name'], line=dict(color=lc['color'], width=3, shape='spline', smoothing=1.3, dash='dash' if 'MEDIA' in lc['name'] else 'solid'), marker=dict(size=10, symbol=lc['sym'], line=dict(color='white', width=1.5)), hovertemplate='%{y:.1f} mm<extra></extra>'))
-                    if lc['c'] == str(ano_act):
-                        fig_p.add_trace(go.Scatter(x=[last_x, last_x], y=[last_y, last_y + 60], mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"], textposition="top center", textfont=dict(color='white', size=14), line=dict(color='white', width=1.5), showlegend=False, hoverinfo='skip'))
-                    else:
-                        y_off = last_y + (i * 5)
-                        fig_p.add_trace(go.Scatter(x=[last_x, last_x], y=[y_off, y_off], mode='markers+text', text=[f"  —  <b>{last_y:.1f}</b>  "], textposition="middle right", textfont=dict(color='white', size=13), marker=dict(opacity=0), showlegend=False, hoverinfo='skip'))
+                    
+                    fig_p.add_trace(go.Scatter(
+                        x=dx, y=dy, mode='lines+markers', name=lc['name'], 
+                        line=dict(color=lc['color'], width=3, dash='dash' if 'MEDIA' in lc['name'] else 'solid', shape='spline'), 
+                        marker=dict(size=8, symbol=lc['sym'], line=dict(color='black', width=1)),
+                        hovertemplate='%{y:.1f} mm<extra></extra>'
+                    ))
+                    # Callouts con texto negro sobre fondo blanco (Modo Light)
+                    fig_p.add_trace(go.Scatter(
+                        x=[last_x, last_x], y=[last_y, last_y + 40],
+                        mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"],
+                        textposition="top center", textfont=dict(color='black', size=12),
+                        line=dict(color='black', width=1), showlegend=False, hoverinfo='skip'
+                    ))
 
-            fig_p.update_layout(height=870, margin=dict(b=120, l=20, r=150, t=20), plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', xaxis=dict(tickangle=-45, showgrid=False, tickfont=dict(family="Arial Black", size=10, color="white"), showline=True, linecolor='white', range=[-0.5, 12.5]), yaxis=dict(dtick=100, showgrid=True, gridcolor='rgba(255,255,255,0.15)', griddash='dash', layer='below traces', showticklabels=False, zeroline=False), legend=dict(orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, font=dict(size=12, color="white"), bgcolor="rgba(0,0,0,0.5)"))
+            fig_p.update_layout(
+                height=800, margin=dict(b=100, l=10, r=50, t=50),
+                plot_bgcolor='white', paper_bgcolor='white',
+                xaxis=dict(tickangle=-45, showgrid=False, tickfont=dict(color="black", family="Arial Black"), showline=True, linecolor='black'),
+                yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', griddash='dash', showticklabels=False, zeroline=False),
+                legend=dict(orientation="v", yanchor="top", y=0.98, xanchor="left", x=0.02, font=dict(color="black", size=10), bgcolor="rgba(255,255,255,0.8)", bordercolor="black", borderwidth=1)
+            )
             st.session_state.fig_plotly = fig_p
 
             # --- 4. LÓGICA ESPACIAL (MATCH TOTAL) ---
@@ -867,7 +888,6 @@ else:
             if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf['P_mm'] = updated_stations_gdf['P_mm_y']
             stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
 
-            # GUARDAR TODAS LAS VARIABLES NECESITADAS POR LA ETAPA 4
             st.session_state.stations_filtered_gdf = stations_filtered_gdf
             st.session_state.outliers_df = pd.DataFrame()
             if len(stations_filtered_gdf) >= 5:
@@ -880,7 +900,7 @@ else:
             st.session_state.progress_percent = 90
             st.rerun()
 
-        # ETAPA 4: PROCESAMIENTO DE MAPA (CON SEGURIDAD)
+        # ETAPA 4: RENDERIZADO DEL MAPA (VERSIÓN ORIGINAL BLANCA)
         elif st.session_state.progress_percent == 90:
             if 'stations_filtered_gdf' not in st.session_state:
                 st.session_state.progress_percent = 60
@@ -888,63 +908,80 @@ else:
                 
             stations_filtered_gdf = st.session_state.stations_filtered_gdf
             interpolation_results = st.session_state.interpolation_results
-            metrics_df = st.session_state.metrics_df
             report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
 
+            # --- CONFIGURACIÓN DE FIGURA ORIGINAL ---
             fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
-            fig.subplots_adjust(right=0.7)
+            ax.set_facecolor('white')
+            fig.subplots_adjust(right=0.75)
+            
             limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
             cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
-            l_b, c_b = limite_gdf.total_bounds, cuenca_gdf.total_bounds
-            t_minx, t_miny = min(l_b[0], c_b[0]), min(l_b[1], c_b[1])
-            t_maxx, t_maxy = max(l_b[2], c_b[2]), max(l_b[3], c_b[3])
-            t_w, t_h = t_maxx - t_minx, t_maxy - t_miny
-            ax.set_xlim(t_minx - t_w*0.05, t_maxx + t_w*0.05)
-            ax.set_ylim(t_miny - t_h*0.05, t_maxy + t_h*0.05)
+            total_bounds = limite_gdf.total_bounds
+            total_w = total_bounds[2] - total_bounds[0]
+            total_h = total_bounds[3] - total_bounds[1]
+            ax.set_xlim(total_bounds[0] - total_w*0.05, total_bounds[2] + total_w*0.05)
+            ax.set_ylim(total_bounds[1] - total_h*0.05, total_bounds[3] + total_h*0.05)
             
+            # Hillshade
             boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
-            clipped_hillshade, clipped_transform = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
-            hill_data = clipped_hillshade[0].astype(float)
+            clipped_hill, clipped_trans = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
+            hill_data = clipped_hill[0].astype(float)
             hill_data[hill_data == 255] = np.nan
-            ax.imshow(hill_data, extent=[clipped_transform[2], clipped_transform[2] + clipped_transform[0] * hill_data.shape[1], clipped_transform[5] + clipped_transform[4] * hill_data.shape[0], clipped_transform[5]], cmap='gray', alpha=0.7, zorder=1)
+            ax.imshow(hill_data, extent=[clipped_trans[2], clipped_trans[2] + clipped_trans[0] * hill_data.shape[1], clipped_trans[5] + clipped_trans[4] * hill_data.shape[0], clipped_trans[5]], cmap='gray', alpha=0.5, zorder=1)
 
+            # Capa de Precipitación
             if interpolation_results and np.any(interpolation_results["raster_image"]):
                 r_img = np.ma.masked_invalid(interpolation_results["raster_image"])
                 r_meta = interpolation_results["raster_meta"]
-                c_cmap = LinearSegmentedColormap.from_list('c_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
+                custom_cmap = LinearSegmentedColormap.from_list('cp', ['#f03725', '#F3FD89', '#1FB6EA'])
                 p_min, p_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
-                show(r_img, ax=ax, transform=r_meta['transform'], cmap=c_cmap, alpha=0.6, vmin=p_min, vmax=p_max, zorder=2)
+                show(r_img, ax=ax, transform=r_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=p_min, vmax=p_max, zorder=2)
             
-            geodata['streams'].to_crs(geodata['hillshade'].crs).plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
-            geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2, zorder=4)
+            # Corrientes y Límites
+            geodata['streams'].to_crs(geodata['hillshade'].crs).plot(ax=ax, color='#10008C', linewidth=0.8, zorder=3)
+            geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2.5, zorder=4)
             geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, zorder=4)
             geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, zorder=4)
             geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, zorder=5)
             
+            # Estaciones
             s_f = stations_filtered_gdf
-            s_f[s_f['ENTIDAD']=='SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
-            s_f[s_f['ENTIDAD']=='CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
+            s_f[s_f['ENTIDAD']=='SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=45, edgecolor='black', label='SAPAL', zorder=6)
+            s_f[s_f['ENTIDAD']=='CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=45, edgecolor='black', label='CONAGUA', zorder=6)
 
-            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
+            # Formato de Ejes (COORDINADAS LIMPIAS)
+            ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+            ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+            ax.tick_params(axis='both', labelsize=10, colors='black')
+            for spine in ax.spines.values(): spine.set_edgecolor('black')
+
+            # Título y Norte
+            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=15, fontweight='bold', loc='left', color='black')
             add_north_arrow(ax)
             
-            # Guardar buffer y finalizar
-            png_buf = io.BytesIO()
-            fig.savefig(png_buf, format="png", dpi=300, facecolor='white')
-            png_buf.seek(0)
-
-            # Preparación para Modo Oscuro en App
+            # Leyenda de Colores (Colorbar)
             if 'p_min' in locals():
-                cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])
-                cb = ColorbarBase(cbar_ax, cmap=c_cmap, norm=Normalize(vmin=p_min, vmax=p_max))
-                cb.ax.yaxis.set_tick_params(color='white', labelcolor='white')
-                cb.outline.set_edgecolor('white')
+                cbar_ax = fig.add_axes([0.78, 0.15, 0.02, 0.3])
+                cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=Normalize(vmin=p_min, vmax=p_max))
+                cb.set_label('Precipitación (mm)', size=11, weight='bold', color='black')
+                cb.ax.tick_params(labelsize=10, colors='black')
 
-            fig.patch.set_facecolor('none'); ax.set_facecolor('none')
-            ax.title.set_color('white'); ax.tick_params(colors='white')
-            for t in ax.texts: t.set_color('white')
-            leg = ax.legend(handles=[Patch(facecolor='none', edgecolor='#38A800', label='MUNICIPIO DE LEÓN'), Patch(facecolor='none', edgecolor='#FF0000', label='CUENCA P. PALOTE'), Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA', linestyle='None'), Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL', linestyle='None')], bbox_to_anchor=(1.02, 1), loc='upper left', facecolor='none', edgecolor='white')
-            for t in leg.get_texts(): t.set_color('white')
+            # Leyenda de Elementos
+            leg_el = [
+                Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
+                Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'),
+                Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'),
+                Line2D([0], [0], color='#10008C', lw=1.5, label='CORRIENTES DE AGUA'),
+                Line2D([0], [0], marker='s', color='none', markeredgecolor='black', markerfacecolor='#55FF00', markersize=10, label='CONAGUA', linestyle='None'),
+                Line2D([0], [0], marker='s', color='none', markeredgecolor='black', markerfacecolor='#00C5FF', markersize=10, label='SAPAL', linestyle='None')
+            ]
+            ax.legend(handles=leg_el, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=11, title='SIMBOLOGÍA', frameon=True, facecolor='white', edgecolor='black')
+
+            # Guardar y Finalizar
+            png_buf = io.BytesIO()
+            fig.savefig(png_buf, format="png", dpi=300, facecolor='white', bbox_inches='tight')
+            png_buf.seek(0)
 
             st.session_state.figure = fig
             st.session_state.png_buffer = png_buf
@@ -1219,6 +1256,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
