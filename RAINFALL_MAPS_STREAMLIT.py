@@ -897,7 +897,7 @@ else:
             st.session_state.progress_percent = 90
             st.rerun()
 
-        # ETAPA 4: RENDERIZADO DEL MAPA (VERSIÓN ORIGINAL BLANCA)
+        # ETAPA 4: RENDERIZADO DEL MAPA PROFESIONAL (DISEÑO ORIGINAL)
         elif st.session_state.progress_percent == 90:
             if 'stations_filtered_gdf' not in st.session_state:
                 st.session_state.progress_percent = 60
@@ -907,64 +907,96 @@ else:
             interpolation_results = st.session_state.interpolation_results
             report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
 
-            # --- CONFIGURACIÓN DE FIGURA ORIGINAL ---
+            # --- 1. CONFIGURACIÓN DE LIENZO ---
             fig, ax = plt.subplots(figsize=(16, 12), facecolor='white')
             ax.set_facecolor('white')
-            fig.subplots_adjust(right=0.75)
+            fig.subplots_adjust(right=0.78, left=0.05, top=0.92, bottom=0.05)
             
+            # --- 2. AJUSTE DE EXTENSIÓN (Zoom al Municipio + Cuenca) ---
             limite_gdf = geodata['boundary'].to_crs(geodata['hillshade'].crs)
             cuenca_gdf = geodata['cuenca'].to_crs(geodata['hillshade'].crs)
-            total_bounds = limite_gdf.total_bounds
-            total_w = total_bounds[2] - total_bounds[0]
-            total_h = total_bounds[3] - total_bounds[1]
-            ax.set_xlim(total_bounds[0] - total_w*0.05, total_bounds[2] + total_w*0.05)
-            ax.set_ylim(total_bounds[1] - total_h*0.05, total_bounds[3] + total_h*0.05)
             
-            # Hillshade
+            l_b = limite_gdf.total_bounds
+            c_b = cuenca_gdf.total_bounds
+            t_minx, t_miny = min(l_b[0], c_b[0]), min(l_b[1], c_b[1])
+            t_maxx, t_maxy = max(l_b[2], c_b[2]), max(l_b[3], c_b[3])
+            
+            t_w, t_h = t_maxx - t_minx, t_maxy - t_miny
+            ax.set_xlim(t_minx - t_w*0.05, t_maxx + t_w*0.05)
+            ax.set_ylim(t_miny - t_h*0.05, t_maxy + t_h*0.05)
+
+            # --- 3. CAPAS RASTER (Relieve y Lluvia) ---
+            # Hillshade (Sombreado de relieve)
             boundary_geom = geodata['boundary'].to_crs(geodata['hillshade'].crs).geometry
             clipped_hill, clipped_trans = mask(geodata['hillshade'], boundary_geom, crop=True, nodata=np.nan)
             hill_data = clipped_hill[0].astype(float)
             hill_data[hill_data == 255] = np.nan
-            ax.imshow(hill_data, extent=[clipped_trans[2], clipped_trans[2] + clipped_trans[0] * hill_data.shape[1], clipped_trans[5] + clipped_trans[4] * hill_data.shape[0], clipped_trans[5]], cmap='gray', alpha=0.5, zorder=1)
+            ax.imshow(hill_data, extent=[clipped_trans[2], clipped_trans[2] + clipped_trans[0] * hill_data.shape[1], 
+                                         clipped_trans[5] + clipped_trans[4] * hill_data.shape[0], clipped_trans[5]], 
+                      cmap='gray', alpha=0.4, zorder=1)
 
-            # Capa de Precipitación
+            # Mancha de Calor (Precipitación)
             if interpolation_results and np.any(interpolation_results["raster_image"]):
                 r_img = np.ma.masked_invalid(interpolation_results["raster_image"])
                 r_meta = interpolation_results["raster_meta"]
-                custom_cmap = LinearSegmentedColormap.from_list('cp', ['#f03725', '#F3FD89', '#1FB6EA'])
+                # Colormap: Rojo -> Amarillo -> Azul
+                custom_cmap = LinearSegmentedColormap.from_list('precip', ['#f03725', '#F3FD89', '#1FB6EA'])
                 p_min, p_max = stations_filtered_gdf['P_mm'].min(), stations_filtered_gdf['P_mm'].max()
                 show(r_img, ax=ax, transform=r_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=p_min, vmax=p_max, zorder=2)
+
+            # --- 4. CAPAS VECTORIALES ---
+            # Corrientes de Agua (Azul fuerte)
+            geodata['streams'].to_crs(geodata['hillshade'].crs).plot(ax=ax, color='#10008C', linewidth=0.7, zorder=3)
             
-            # Corrientes y Límites
-            geodata['streams'].to_crs(geodata['hillshade'].crs).plot(ax=ax, color='#10008C', linewidth=0.8, zorder=3)
-            geodata['boundary'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2.5, zorder=4)
-            geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.5, zorder=4)
-            geodata['cuenca'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, zorder=4)
+            # Límite Municipal (Verde)
+            limite_gdf.plot(ax=ax, facecolor='none', edgecolor='#38A800', linewidth=2.5, zorder=4)
+            
+            # Límite Urbano (Negro)
+            geodata['urban'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='none', edgecolor='#000000', linewidth=1.2, zorder=4)
+            
+            # Cuenca Palote (Rojo)
+            cuenca_gdf.plot(ax=ax, facecolor='none', edgecolor='#FF0000', linewidth=1.5, zorder=4)
+            
+            # Presa El Palote (Cian con borde azul)
             geodata['presa'].to_crs(geodata['hillshade'].crs).plot(ax=ax, facecolor='#00E6A9', edgecolor='#002673', linewidth=1, zorder=5)
             
-            # Estaciones
+            # Estaciones (Cuadros con borde negro)
             s_f = stations_filtered_gdf
-            s_f[s_f['ENTIDAD']=='SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=45, edgecolor='black', label='SAPAL', zorder=6)
-            s_f[s_f['ENTIDAD']=='CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=45, edgecolor='black', label='CONAGUA', zorder=6)
+            s_f[s_f['ENTIDAD']=='SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=40, edgecolor='black', zorder=6)
+            s_f[s_f['ENTIDAD']=='CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=40, edgecolor='black', zorder=6)
 
-            # Formato de Ejes (COORDINADAS LIMPIAS)
+            # --- 5. ESTÉTICA DE EJES Y TÍTULOS ---
             ax.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
             ax.yaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
-            ax.tick_params(axis='both', labelsize=10, colors='black')
+            ax.tick_params(axis='both', labelsize=10, colors='black', direction='in')
             for spine in ax.spines.values(): spine.set_edgecolor('black')
+            ax.grid(True, linestyle=':', alpha=0.4, color='gray')
 
-            # Título y Norte
-            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=15, fontweight='bold', loc='left', color='black')
+            ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", 
+                         fontsize=15, fontweight='bold', loc='left', color='black', pad=20)
+            
+            # Flecha Norte y Escala
             add_north_arrow(ax)
             
-            # Leyenda de Colores (Colorbar)
-            if 'p_min' in locals():
-                cbar_ax = fig.add_axes([0.78, 0.15, 0.02, 0.3])
-                cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=Normalize(vmin=p_min, vmax=p_max))
-                cb.set_label('Precipitación (mm)', size=11, weight='bold', color='black')
-                cb.ax.tick_params(labelsize=10, colors='black')
+            # Barra de escala manual (5 km)
+            scale_x = t_minx + t_w*0.02
+            scale_y = t_miny + t_h*0.02
+            for i in range(5):
+                color = 'black' if i % 2 == 0 else 'white'
+                ax.add_patch(plt.Rectangle((scale_x + i*1000, scale_y), 1000, t_h*0.007, facecolor=color, edgecolor='black', zorder=10))
+            ax.text(scale_x, scale_y - t_h*0.01, '0', ha='center', fontsize=9, weight='bold')
+            ax.text(scale_x + 5000, scale_y - t_h*0.01, '5 km', ha='center', fontsize=9, weight='bold')
 
-            # Leyenda de Elementos
+            # --- 6. LEYENDAS ---
+            # Barra de colores de lluvia
+            if 'p_min' in locals():
+                cbar_ax = fig.add_axes([0.80, 0.15, 0.02, 0.3])
+                norm = Normalize(vmin=p_min, vmax=p_max)
+                cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm)
+                cb.set_label('Precipitación (mm)', size=11, weight='bold')
+                cb.ax.tick_params(labelsize=10)
+
+            # Cuadro de Simbología
             leg_el = [
                 Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
                 Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'),
@@ -973,9 +1005,19 @@ else:
                 Line2D([0], [0], marker='s', color='none', markeredgecolor='black', markerfacecolor='#55FF00', markersize=10, label='CONAGUA', linestyle='None'),
                 Line2D([0], [0], marker='s', color='none', markeredgecolor='black', markerfacecolor='#00C5FF', markersize=10, label='SAPAL', linestyle='None')
             ]
-            ax.legend(handles=leg_el, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=11, title='SIMBOLOGÍA', frameon=True, facecolor='white', edgecolor='black')
+            ax.legend(handles=leg_el, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=11, title='SIMBOLOGÍA', 
+                      title_fontsize=12, frameon=True, facecolor='white', edgecolor='black').get_title().set_fontweight('bold')
 
-            # Guardar y Finalizar
+            # --- 7. LOGO AZUL (ESQUINA INFERIOR DERECHA) ---
+            if geodata["logo_azul"] is not None:
+                logo = geodata["logo_azul"]
+                l_w = t_w * 0.15
+                aspect = logo.shape[0] / logo.shape[1]
+                l_h = l_w * aspect
+                ax.imshow(logo, extent=[t_maxx - l_w - t_w*0.02, t_maxx - t_w*0.02, t_miny + t_h*0.02, t_miny + t_h*0.02 + l_h], 
+                          aspect='auto', zorder=15)
+
+            # Guardar y enviar a Streamlit
             png_buf = io.BytesIO()
             fig.savefig(png_buf, format="png", dpi=300, facecolor='white', bbox_inches='tight')
             png_buf.seek(0)
@@ -983,7 +1025,14 @@ else:
             st.session_state.figure = fig
             st.session_state.png_buffer = png_buf
             st.session_state.report_date_str = report_date_pd.strftime('%Y%m%d')
-            st.session_state.stats_panel_md = {"header": f"### Reporte {report_date_pd.strftime('%d/%m/%Y')}", "desc_stats": s_f['P_mm'].describe().to_frame().T, "total_df_con_na": s_f[['Name', 'P_mm']]}
+            
+            # Panel de estadísticas
+            st.session_state.stats_panel_md = {
+                "header": f"### 📊 Reporte {report_date_pd.strftime('%d/%m/%Y')}",
+                "desc_stats": s_f['P_mm'].describe().to_frame().T.rename(columns={'mean':'Promedio','max':'Máximo','min':'Mínimo'}),
+                "total_df_con_na": s_f[['Name', 'P_mm']].sort_values(by='P_mm', ascending=False)
+            }
+            
             st.session_state.map_generated = True
             st.session_state.processing_state = 'idle'
             st.session_state.progress_percent = 100
@@ -1253,6 +1302,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
