@@ -357,62 +357,51 @@ import re
 
 import time # Añade esta si no la tienes
 
+
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Versión Final Pro - Sincronización Total para Streamlit Cloud.
-    Usa el catálogo dinámico para asegurar match con el historial (POST).
+    Versión 25.0 - PRODUCCIÓN TOTAL.
+    Lógica de ID técnico (ubicacion) para historial y Nombre para el mapa.
     """
     results = []
-    # 1. Determinar si es consulta en tiempo real o histórica
     is_today = report_date.date() == datetime.now().date()
     
+    # Endpoints correctos según Postman
     url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
     url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
     
-    # Headers optimizados para evitar bloqueos del servidor
     headers = {
         "Accept": "application/json", 
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0", 
         "Referer": "https://www.sapal.gob.mx/"
     }
-    
     session = requests.Session()
 
     try:
-        # --- PASO 1: OBTENER EL CATÁLOGO DINÁMICO (SIEMPRE) ---
-        # Esto nos da la 'ubicacion' (ID técnico) y el 'nombre' (para el mapa)
+        # --- PASO 1: OBTENER EL CATÁLOGO (UBICACIONES REALES) ---
         r_cat = session.get(url_lista, headers=headers, verify=False, timeout=20)
-        r_cat.raise_for_status()
         items_api = r_cat.json().get('items', {})
 
-        if not items_api:
-            log_messages.append("⚠️ El servidor de SAPAL no devolvió estaciones activas.")
-            return pd.DataFrame()
-
-        # --- CASO A: TIEMPO REAL (HOY) ---
         if is_today:
-            log_messages.append("--- [FLUJO HOY] Extrayendo acumulados actuales ---")
+            log_messages.append("--- [PRODUCCIÓN] Extrayendo datos de HOY ---")
             for st_id, info in items_api.items():
-                nombre_mapa = str(info.get('nombre', '')).upper().strip()
+                name = str(info.get('nombre', '')).upper().strip()
                 val = info.get('precipitacionAcumuladaAnual1', 0)
-                
-                try: val_num = float(str(val).replace(',', ''))
-                except: val_num = 0.0
-                
-                results.append({'Name': nombre_mapa, 'ENTIDAD': 'SAPAL', 'P_mm': val_num})
-                log_messages.append(f"✅ **{nombre_mapa}**: {val_num:.1f} mm")
+                try: val_float = float(str(val).replace(',', ''))
+                except: val_float = 0.0
+                results.append({'Name': name, 'ENTIDAD': 'SAPAL', 'P_mm': val_float})
+                log_messages.append(f"✅ **{name}**: {val_float:.1f} mm")
                 log_container.markdown("\n\n".join(log_messages))
-
-        # --- CASO B: HISTÓRICO (FECHA MANUAL) ---
+        
         else:
-            log_messages.append(f"--- [FLUJO HISTÓRICO] Consultando {len(items_api)} estaciones para el {report_date.strftime('%d-%m-%Y')} ---")
+            log_messages.append(f"--- [PRODUCCIÓN] Consultando historial para {report_date.strftime('%d-%m-%Y')} ---")
             log_container.markdown("\n\n".join(log_messages))
 
             def history_worker(info_estacion):
-                # Usamos 'ubicacion' para la consulta técnica
+                # Usamos 'ubicacion' para el query técnico (Ej. Colombia)
                 llave_tecnica = info_estacion.get('ubicacion')
-                # Guardamos con el 'nombre' para que coincida con el Shapefile
+                # Usamos 'nombre' para el Shapefile (Ej. CENTRO)
                 nombre_mapa = str(info_estacion.get('nombre', '')).upper().strip()
                 
                 fecha_str = report_date.strftime('%d-%m-%Y')
@@ -423,47 +412,40 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
                     "period": "M" 
                 }
                 try:
-                    # Petición POST según especificación de Postman
                     r = requests.post(url_historial, headers=headers, json=payload, verify=False, timeout=15)
                     if r.status_code == 200:
                         data = r.json()
-                        registros = data.get('items', {}).get('registros', [])
-                        if registros:
-                            # Sacamos el acumulado anual de ese día
-                            val_anual = registros[-1].get('precipitacionAnual', 0)
+                        # Estructura: items -> registros
+                        regs = data.get('items', {}).get('registros', [])
+                        if regs:
+                            # Sacamos 'precipitacionAnual' del último registro
+                            val_anual = regs[-1].get('precipitacionAnual', 0)
                             return {'Name': nombre_mapa, 'P_mm': float(val_anual), 'ok': True}
-                    
                     return {'Name': nombre_mapa, 'P_mm': 0.0, 'ok': False}
                 except:
                     return {'Name': nombre_mapa, 'P_mm': np.nan, 'ok': False}
 
-            # Ejecución en paralelo (10 hilos para máxima velocidad en Streamlit Cloud)
+            # Paralelismo para GitHub
             with ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_st = {executor.submit(history_worker, info): info for info in items_api.values()}
-                
-                for future in as_completed(future_to_st):
-                    res = future.result()
+                futures = [executor.submit(history_worker, info) for info in items_api.values()]
+                for f in as_completed(futures):
+                    res = f.result()
+                    # Mapeo manual para asegurar match
+                    n = res['Name']
+                    if "MORELOS" in n: n = "BLVD MORELOS-MADRAZO"
                     
-                    # Pequeño ajuste para nombres con variaciones (Opcional)
-                    nombre_final = res['Name']
-                    if "MORELOS" in nombre_final: nombre_final = "BLVD MORELOS-MADRAZO"
-                    
-                    results.append({'Name': nombre_final, 'ENTIDAD': 'SAPAL', 'P_mm': res['P_mm']})
-                    
+                    results.append({'Name': n, 'ENTIDAD': 'SAPAL', 'P_mm': res['P_mm']})
                     if res['ok']:
-                        log_messages.append(f"✅ **{nombre_final}**: {res['P_mm']:.1f} mm")
+                        log_messages.append(f"✅ **{n}**: {res['P_mm']:.1f} mm")
                     else:
-                        log_messages.append(f"⚠️ **{nombre_final}**: 0.0 mm (Sin registros)")
-                    
-                    # Actualizar UI de Streamlit
+                        log_messages.append(f"⚠️ **{n}**: 0.0 mm")
                     log_container.markdown("\n\n".join(log_messages))
 
     except Exception as e:
-        log_messages.append(f"❌ Error crítico en SAPAL: {e}")
+        log_messages.append(f"❌ Error en SAPAL: {e}")
         log_container.markdown("\n\n".join(log_messages))
-        
-    return pd.DataFrame(results)
 
+    return pd.DataFrame(results)
 
 def filter_outliers(gdf, column='P_mm'):
     Q1 = gdf[column].quantile(0.25); Q3 = gdf[column].quantile(0.75)
@@ -1230,6 +1212,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
