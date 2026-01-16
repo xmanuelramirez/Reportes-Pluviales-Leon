@@ -358,85 +358,60 @@ import re
 import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
+    """
+    Versión 16.0 - Optimizada para GitHub y Streamlit Cloud.
+    Extrae datos de la estructura 'items' y normaliza nombres.
+    """
     results = []
-    log_messages.append("--- Iniciando Extracción Dinámica (SAPAL 2026) ---")
+    log_messages.append("--- Extrayendo Datos en Tiempo Real (API REST) ---")
     log_container.markdown("\n\n".join(log_messages))
 
+    url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
     session = requests.Session()
     headers = {
-        "User-Agent": "Mozilla/5.0",
         "Accept": "application/json",
-        "Content-Type": "application/json"
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://www.sapal.gob.mx/"
     }
 
-    url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
-    url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
-    
-    # 1. Obtener catálogo oficial
     try:
-        r_list = session.get(url_lista, headers=headers, verify=False, timeout=20)
-        # Extraemos nombres quitando espacios extra
-        estaciones_api = [e.get('name').strip() for e in r_list.json().get('data', []) if e.get('name')]
+        # Petición al servidor
+        response = session.get(url_lista, headers=headers, verify=False, timeout=20)
+        response.raise_for_status()
+        raw_data = response.json()
+        items = raw_data.get('items', {})
         
-        # LOG PARA CONFIRMAR TUS 21 ESTACIONES
-        num_estaciones = len(estaciones_api)
-        log_messages.append(f"📡 El API reporta {num_estaciones} estaciones activas en total.")
-        if num_estaciones < 21:
-            log_messages.append(f"⚠️ Nota: El API detectó menos de 21 estaciones. (Nombres: {', '.join(estaciones_api[:5])}...)")
-        log_container.markdown("\n\n".join(log_messages))
-        
-    except Exception as e:
-        log_messages.append(f"❌ Error al conectar con catálogo: {e}")
-        return pd.DataFrame()
+        if not items:
+            log_messages.append("⚠️ No se encontraron estaciones en el servidor.")
+            return pd.DataFrame()
 
-    # 2. Consultar historial de cada una
-    for api_name in estaciones_api:
-        # Rango: Del 1 de enero a la fecha de corte
-        fecha_inicio = f"01-01-{report_date.year}"
-        fecha_fin = report_date.strftime('%d-%m-%Y')
-        
-        payload = {
-            "location": api_name,
-            "startDate": fecha_inicio,
-            "endDate": fecha_fin,
-            "period": "D" # "D" nos da el desglose diario para sumar ceros correctamente
-        }
-
-        try:
-            response = session.post(url_historial, headers=headers, json=payload, timeout=25, verify=False)
+        for st_id, info in items.items():
+            # 1. Extraer nombre tal cual viene en la API
+            api_name_raw = info.get('nombre', '').strip()
             
-            if response.status_code == 200:
-                data = response.json()
-                registros = data.get('data', []) if isinstance(data, dict) else data
-                
-                # --- LÓGICA DE CERO (TU PETICIÓN) ---
-                if not registros or len(registros) == 0:
-                    # Si la estación existe pero no hay datos, asumimos 0.0 mm
-                    log_messages.append(f"✅ {api_name}: 0.0 mm (Sin lluvia registrada)")
-                    results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
-                else:
-                    df_temp = pd.DataFrame(registros)
-                    # Buscamos columna de valor (precipitacion o value)
-                    col_lluvia = next((c for c in df_temp.columns if any(x in c.lower() for x in ['precip', 'value', 'valor'])), None)
-                    
-                    if col_lluvia:
-                        valor_total = pd.to_numeric(df_temp[col_lluvia], errors='coerce').sum()
-                        log_messages.append(f"✅ {api_name}: {valor_total:.1f} mm")
-                        results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': valor_total})
-                    else:
-                        # Si hay registros pero no columna, ponemos 0.0 para no perder la estación
-                        results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
-            else:
-                log_messages.append(f"⚠️ {api_name}: Servidor no respondió (Error {response.status_code})")
-                results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+            # 2. Extraer lluvia acumulada anual
+            lluvia_val = info.get('precipitacionAcumuladaAnual1', 0)
+            try:
+                lluvia_val = float(str(lluvia_val).replace(',', ''))
+            except:
+                lluvia_val = 0.0
 
-        except Exception as e:
-            log_messages.append(f"❌ {api_name}: Error de conexión.")
-            results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-        
-        finally:
-            log_container.markdown("\n\n".join(log_messages))
-            time.sleep(0.1)
+            # 3. NORMALIZACIÓN (Aquí es donde se hace el Match con el Shapefile)
+            # Pasamos a MAYÚSCULAS para que sea más fácil el match
+            nombre_para_mapa = api_name_raw.upper()
+
+            results.append({
+                'Name': nombre_para_mapa,
+                'ENTIDAD': 'SAPAL',
+                'P_mm': lluvia_val
+            })
+            log_messages.append(f"✅ Detectada: **{nombre_para_mapa}** | {lluvia_val} mm")
+
+    except Exception as e:
+        log_messages.append(f"❌ Error en API SAPAL: {e}")
+    
+    finally:
+        log_container.markdown("\n\n".join(log_messages))
 
     return pd.DataFrame(results)
 
@@ -1170,6 +1145,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
