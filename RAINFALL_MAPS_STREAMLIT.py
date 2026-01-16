@@ -800,13 +800,13 @@ else:
             col_media_base = next((c for c in df_hist.columns if "MEDIA LEÓN" in c.upper() and "2011-2023" in c), None)
             
             if str(ano_act) not in df_hist.columns:
-                df_hist[str(ano_act)] = np.nan
+                df_hist[str(ano_act)] = 0.0
 
-            # LÓGICA ANTI-DUPLICADO (RESTAMOS LO ACUMULADO EN EL EXCEL)
-            # Solo guardamos la diferencia para que al sumar en la gráfica de el total correcto
-            acum_anterior_excel = df_hist[str(ano_act)].iloc[:mes_idx].sum()
-            ponderado_mensual_real = ponderado_anual_api - acum_anterior_excel
-            df_hist.loc[mes_idx, str(ano_act)] = ponderado_mensual_real
+            # Diferencia: Total_API - Suma_Meses_Anteriores_Excel = Valor_Mes_Actual
+            suma_previos = df_hist[str(ano_act)].iloc[:mes_idx].sum()
+            df_hist.loc[mes_idx, str(ano_act)] = max(0, ponderado_anual_api - suma_previos)
+            df_hist.to_excel(EXCEL_PATH, index=False)
+            
 
             # Media Dinámica Original
             anos_extra = [c for c in df_hist.columns if c.isdigit() and int(c) > 2023]
@@ -835,7 +835,8 @@ else:
             ]
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
-                x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}", 
+                x=meses_labels[:mes_idx+1], y=y_actual_acum[:mes_idx+1], 
+                name=f"Acumulado {ano_act}", 
                 marker=dict(color=bar_colors, line=dict(color='black', width=0.5)),
                 hovertemplate='Total: %{y:.1f} mm<extra></extra>'
             ))
@@ -848,20 +849,22 @@ else:
                 {'c':label_media,    'color':'#FF5F1F', 'name':label_media,        'sym':'star'}
             ]
             
-            # --- EL BUCLE FOR CORREGIDO ---
+            # --- CURVAS ACUMULADAS ---
             for i, lc in enumerate(configs):
                 if lc['c'] in df_hist.columns:
-                    # 1. DEFINIR is_current para evitar el NameError
                     is_current = (lc['c'] == str(ano_act))
                     
-                    y_v = df_hist[lc['c']].fillna(0).cumsum() if 'CURVA' in lc['name'] or lc['c'].isdigit() else df_hist[lc['c']]
+                    # Si es un año (2018-2025), acumulamos los mm/mes del Excel
+                    if lc['c'].isdigit():
+                        y_v = df_hist[lc['c']].fillna(0).cumsum()
+                    else:
+                        y_v = df_hist[lc['c']].fillna(0) # La Media ya viene calculada
+                    
                     limit = mes_idx + 1 if is_current else 12
                     dx, dy = meses_labels[:limit], y_v[:limit]
                     
-                    # Verificamos que existan datos antes de sacar el último valor
                     if len(dy) > 0:
                         last_x, last_y = dx[-1], dy.iloc[-1]
-                        
                         fig_p.add_trace(go.Scatter(
                             x=dx, y=dy, mode='lines+markers', name=lc['name'], 
                             line=dict(color=lc['color'], width=3, dash='dash' if 'MEDIA' in lc['name'] else 'solid', shape='spline'), 
@@ -1435,6 +1438,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
