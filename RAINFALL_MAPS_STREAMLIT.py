@@ -841,7 +841,7 @@ else:
             ))
 
             configs = [
-                {'c':str(ano_act),'color':'#FFF00','name':f'CURVA {ano_act}','sym':'circle'},
+                {'c':str(ano_act),'color':'#FFFF00','name':f'CURVA {ano_act}','sym':'circle'},
                 {'c':str(ano_act-1),'color':'#39FF14','name':str(ano_act-1),'sym':'square'},
                 {'c':str(ano_act-2),'color':'#FF00FF','name':str(ano_act-2),'sym':'diamond'},
                 {'c':label_media,'color':'#FF5F1F','name':label_media,'sym':'star'}
@@ -1420,6 +1420,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
