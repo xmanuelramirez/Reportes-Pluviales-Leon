@@ -792,61 +792,96 @@ else:
             # Guardar cambios en el archivo físico
             df_hist.to_excel(EXCEL_PATH, index=False)
 
-            # --- 3. GRÁFICA PLOTLY (SOLO SAPAL) ---
+            # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (CURVAS ACUMULADAS) ---
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
+
+            # A. PREPARACIÓN DE DATOS (IMPORTANTE: APLICAR CUMSUM)
+            # Creamos una copia de los datos para no alterar el Excel
+            df_plot = df_hist.copy()
             
-            # BARRAS: Acumulado SAPAL Año Actual
-            # Usamos fillna(0) para que no haya huecos en la gráfica
-            y_actual_plot = df_hist[str(ano_act)].fillna(0)
+            # Años a graficar
+            col_2026 = str(ano_act)
+            col_2025 = str(ano_act - 1)
+            col_2024 = str(ano_act - 2)
+
+            # --- BARRAS (ACUMULADO 2026) ---
+            # El cumsum() hace que la barra de febrero sea (Ene + Feb)
+            y_2026_acum = df_plot[col_2026].fillna(0).cumsum()
             
             fig_p.add_trace(go.Bar(
-                x=meses_labels, y=y_actual_plot, 
-                name=f"Acumulado SAPAL {ano_act}",
-                marker=dict(color='#0D6AB7', line=dict(color='white', width=0.5)),
+                x=meses_labels, y=y_2026_acum, 
+                name=f"Acumulado {col_2026}",
+                marker=dict(color='rgba(13, 106, 183, 0.4)', line=dict(color='#0D6AB7', width=1)),
                 hovertemplate='Acumulado: %{y:.1f} mm<extra></extra>'
             ))
 
-            # CURVAS COMPARATIVAS
-            configs = [
-                {'c': str(ano_act), 'color': '#FFFF00', 'name': f'CURVA {ano_act}', 'sym': 'circle'}, 
-                {'c': str(ano_act-1), 'color': '#39FF14', 'name': str(ano_act-1), 'sym': 'square'}, 
-                {'c': label_media, 'color': '#FF5F1F', 'name': label_media, 'sym': 'star'} 
+            # --- CONFIGURACIÓN DE LÍNEAS NEÓN ---
+            # Definimos qué años queremos ver y sus estilos
+            line_configs = [
+                {'col': col_2026, 'color': '#FFFF00', 'name': f'CURVA {col_2026}', 'dash': 'solid', 'marker': 'circle'},
+                {'col': col_2025, 'color': '#39FF14', 'name': f'AÑO {col_2025}', 'dash': 'solid', 'marker': 'square'},
+                {'col': col_2024, 'color': '#FF00FF', 'name': f'AÑO {col_2024}', 'dash': 'solid', 'marker': 'diamond'},
+                {'col': label_media, 'color': '#FF5F1F', 'name': label_media, 'dash': 'dash', 'marker': 'star'}
             ]
 
-            for i, lc in enumerate(configs):
-                if lc['c'] in df_hist.columns:
-                    y_v = df_hist[lc['c']].fillna(0)
-                    limit = mes_idx + 1 if lc['c'] == str(ano_act) else 12
+            for lc in line_configs:
+                if lc['col'] in df_plot.columns:
+                    # Calculamos el acumulado para la línea
+                    # Para la MEDIA, si ya es un valor acumulado en tu Excel no necesita cumsum, 
+                    # pero normalmente son valores mensuales, así que aplicamos cumsum a todo.
+                    y_values = df_plot[lc['col']].fillna(0).cumsum()
                     
-                    dx, dy = meses_labels[:limit], y_v[:limit]
+                    # Si es el año actual, solo graficamos hasta el mes en curso
+                    limit = mes_idx + 1 if lc['col'] == col_2026 else 12
                     
-                    # Curva principal
+                    x_data = meses_labels[:limit]
+                    y_data = y_values[:limit]
+
+                    # 1. SOMBRA DE LA LÍNEA (Efecto Resplandor)
                     fig_p.add_trace(go.Scatter(
-                        x=dx, y=dy, mode='lines+markers', name=lc['name'],
-                        line=dict(color=lc['color'], width=3, dash='dash' if 'MEDIA' in lc['name'] else 'solid'),
-                        marker=dict(size=10, symbol=lc['sym'], line=dict(color='white', width=1)),
+                        x=x_data, y=y_data, mode='lines',
+                        line=dict(color=lc['color'], width=6, shape='spline', smoothing=1.3),
+                        opacity=0.2, showlegend=False, hoverinfo='skip'
+                    ))
+
+                    # 2. LÍNEA PRINCIPAL
+                    fig_p.add_trace(go.Scatter(
+                        x=x_data, y=y_data, mode='lines+markers', name=lc['name'],
+                        line=dict(color=lc['color'], width=3, dash=lc['dash'], shape='spline', smoothing=1.3),
+                        marker=dict(size=10, symbol=lc['marker'], line=dict(color='white', width=1)),
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
-                    
-                    # Callout (Valor al final de la línea)
-                    last_val = dy.iloc[-1]
+
+                    # 3. CALLOUT (VALOR FINAL)
+                    last_val = y_data.iloc[-1]
                     fig_p.add_trace(go.Scatter(
-                        x=[dx[-1]], y=[last_val],
+                        x=[x_data[-1]], y=[last_val],
                         mode='markers+text',
-                        text=[f" <b>{last_val:.1f}</b>"],
+                        text=[f"  <b>{last_val:.1f}</b>"],
                         textposition="middle right",
-                        textfont=dict(color='white', size=12),
+                        textfont=dict(color=lc['color'], size=13),
                         marker=dict(opacity=0),
                         showlegend=False, hoverinfo='skip'
                     ))
 
+            # --- DISEÑO DEL LAYOUT ---
             fig_p.update_layout(
-                height=800, margin=dict(b=100, l=20, r=80, t=50),
+                height=850, margin=dict(b=120, l=10, r=100, t=50),
                 plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
-                xaxis=dict(tickangle=-45, tickfont=dict(color="white"), showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor='rgba(255,255,255,0.1)', showticklabels=False),
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(color="white"))
+                xaxis=dict(
+                    tickangle=-45, showgrid=False, 
+                    tickfont=dict(color="white", size=11),
+                    range=[-0.5, 12.5] 
+                ),
+                yaxis=dict(
+                    showgrid=True, gridcolor='rgba(255,255,255,0.1)', 
+                    showticklabels=False, zeroline=False
+                ),
+                legend=dict(
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5,
+                    font=dict(color="white", size=12), bgcolor='rgba(0,0,0,0)'
+                )
             )
             st.session_state.fig_plotly = fig_p
             
@@ -1112,6 +1147,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
