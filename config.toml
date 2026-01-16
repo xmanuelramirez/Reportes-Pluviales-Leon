@@ -1,6 +1,18 @@
+# Archivo: .streamlit/config.toml
+
 [theme]
-primaryColor = "#0D6AB7"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
-textColor = "#000000"
-font = "sans serif"
+# Color primario para elementos interactivos (botones, sliders, etc.)
+primaryColor="#007dbf"
+
+# Color de fondo principal de la aplicación
+backgroundColor="#FFFFFF"
+
+# Color de fondo secundario (para barras laterales, recuadros, etc.)
+secondaryBackgroundColor="#FFFFFF"
+
+# Color del texto principal para asegurar que sea legible sobre el fondo oscuro
+textColor="#122045"
+
+# Fuente
+font="sans serif"
+
