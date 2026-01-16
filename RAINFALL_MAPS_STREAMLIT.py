@@ -637,7 +637,7 @@ if st.session_state.map_generated:
                 st.dataframe(st.session_state.stats_panel_md["total_df_con_na"], hide_index=True, use_container_width=True)
         
         # Botón para reiniciar abajo de las tablas
-        if st.button("🔄 Realizar Nuevo Análisis", use_container_width=True):
+        if st.button("Nuevo Análisis", use_container_width=True):
             reset_analysis()
             st.rerun()
 else:
@@ -828,16 +828,20 @@ else:
             # --- 3. GENERACIÓN DE GRÁFICA PLOTLY (VERSIÓN BLANCA / TEXTO NEGRO) ---
             meses_labels = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE']
             fig_p = go.Figure()
-            
+            # A. ESCALA DE AZULES PARA DEGRADADO MARCADO (Izquierda a Derecha)
+            bar_colors = [
+                '#E3F2FD', '#BBDEFB', '#90CAF9', '#64B5F6', '#42A5F5', '#2196F3', 
+                '#1E88E5', '#1976D2', '#1565C0', '#0D47A1', '#08225E', '#051233'
+            ]
             y_actual_acum = df_hist[str(ano_act)].fillna(0).cumsum()
             fig_p.add_trace(go.Bar(
                 x=meses_labels, y=y_actual_acum, name=f"Acumulado {ano_act}", 
-                marker=dict(color=y_actual_acum, colorscale='Blues', line=dict(color='black', width=0.5)),
+                marker=dict(color=bar_colors, line=dict(color='black', width=0.5)),
                 hovertemplate='Total: %{y:.1f} mm<extra></extra>'
             ))
 
             configs = [
-                {'c':str(ano_act),'color':'#0070FF','name':f'CURVA {ano_act}','sym':'circle'},
+                {'c':str(ano_act),'color':'#FFF00','name':f'CURVA {ano_act}','sym':'circle'},
                 {'c':str(ano_act-1),'color':'#39FF14','name':str(ano_act-1),'sym':'square'},
                 {'c':str(ano_act-2),'color':'#FF00FF','name':str(ano_act-2),'sym':'diamond'},
                 {'c':label_media,'color':'#FF5F1F','name':label_media,'sym':'star'}
@@ -856,16 +860,30 @@ else:
                         marker=dict(size=8, symbol=lc['sym'], line=dict(color='black', width=1)),
                         hovertemplate='%{y:.1f} mm<extra></extra>'
                     ))
-                    # Callouts con texto negro sobre fondo blanco (Modo Light)
-                    fig_p.add_trace(go.Scatter(
-                        x=[last_x, last_x], y=[last_y, last_y + 40],
-                        mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"],
-                        textposition="top center", textfont=dict(color='black', size=12),
-                        line=dict(color='black', width=1), showlegend=False, hoverinfo='skip'
-                    ))
+                    # 3. LÓGICA DE CALLOUTS (VERTICAL VS HORIZONTAL)
+                    if is_current:
+                        # Callout VERTICAL para el año actual (Hacia arriba)
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x, last_x], y=[last_y, last_y + 40],
+                            mode='lines+text', text=["", f"<b>{last_y:.1f}</b>"],
+                            textposition="top center", textfont=dict(color='black', size=13),
+                            line=dict(color='black', width=1.5), showlegend=False, hoverinfo='skip'
+                        ))
+                    else:
+                        # Callout HORIZONTAL para años anteriores (Hacia la derecha)
+                        # Usamos un pequeño desfase para que los textos no se encimen
+                        y_pos_text = last_y + (i * 2) 
+                        fig_p.add_trace(go.Scatter(
+                            x=[last_x], y=[y_pos_text],
+                            mode='markers+text', 
+                            # El guion largo "—" simula la línea horizontal del callout
+                            text=[f"  <b>—  {last_y:.1f}</b>"], 
+                            textposition="middle right", textfont=dict(color='black', size=12),
+                            marker=dict(opacity=0), showlegend=False, hoverinfo='skip'
+                        ))
 
             fig_p.update_layout(
-                height=800, margin=dict(b=100, l=10, r=50, t=50),
+                height=800, margin=dict(b=100, l=10, r=100, t=50),
                 plot_bgcolor='white', paper_bgcolor='white',
                 xaxis=dict(tickangle=-45, showgrid=False, tickfont=dict(color="black", family="Arial Black"), showline=True, linecolor='black'),
                 yaxis=dict(showgrid=True, gridcolor='rgba(0,0,0,0.1)', griddash='dash', showticklabels=False, zeroline=False),
@@ -1129,7 +1147,6 @@ else:
             
             # Panel de estadísticas
             st.session_state.stats_panel_md = {
-                "header": f"### 📊 Reporte {report_date_pd.strftime('%d/%m/%Y')}",
                 "desc_stats": s_f['P_mm'].describe().to_frame().T.rename(columns={'mean':'Promedio','max':'Máximo','min':'Mínimo'}),
                 "total_df_con_na": s_f[['Name', 'P_mm']].sort_values(by='P_mm', ascending=False)
             }
@@ -1403,6 +1420,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
