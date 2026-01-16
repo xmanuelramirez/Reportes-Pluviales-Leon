@@ -359,46 +359,76 @@ import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     results = []
-    log_messages.append("--- Extrayendo Datos de SAPAL (API REST) ---")
-    log_container.markdown("\n\n".join(log_messages))
-
-    url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
+    # 1. Identificar si es Hoy o Histórico
+    is_today = report_date.date() == datetime.now().date()
+    
     session = requests.Session()
-    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0", "Referer": "https://www.sapal.gob.mx/"}
+    headers = {
+        "Accept": "application/json", 
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0", 
+        "Referer": "https://www.sapal.gob.mx/"
+    }
 
-    try:
-        response = session.get(url_lista, headers=headers, verify=False, timeout=20)
-        raw_data = response.json()
-        items = raw_data.get('items', {})
-        
-        for st_id, info in items.items():
-            # 1. Nombre tal cual viene en la API
-            api_name = str(info.get('nombre', '')).upper().strip()
-            
-            # 2. Extraer lluvia (precipitacionAcumuladaAnual1 según tu JSON)
-            lluvia = info.get('precipitacionAcumuladaAnual1', 0)
-            try: 
-                lluvia = float(str(lluvia).replace(',', ''))
-            except: 
-                lluvia = 0.0
-
-            # 3. Guardamos los datos
-            results.append({
-                'Name': api_name,
-                'ENTIDAD': 'SAPAL',
-                'P_mm': lluvia
-            })
-            
-            # --- LÍNEA MODIFICADA PARA MOSTRAR LA LECTURA ---
-            log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
-            
-            # Actualizamos el contenedor visual inmediatamente
+    # --- FLUJO A: TIEMPO REAL (TU CÓDIGO ORIGINAL) ---
+    if is_today:
+        log_messages.append("--- Extrayendo Datos de SAPAL (API REST - Tiempo Real) ---")
+        log_container.markdown("\n\n".join(log_messages))
+        url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
+        try:
+            response = session.get(url_lista, headers=headers, verify=False, timeout=20)
+            raw_data = response.json()
+            items = raw_data.get('items', {})
+            for st_id, info in items.items():
+                api_name = str(info.get('nombre', '')).upper().strip()
+                lluvia = info.get('precipitacionAcumuladaAnual1', 0)
+                try: lluvia = float(str(lluvia).replace(',', ''))
+                except: lluvia = 0.0
+                results.append({'Name': api_name, 'ENTIDAD': 'SAPAL', 'P_mm': lluvia})
+                log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
+                log_container.markdown("\n\n".join(log_messages))
+        except Exception as e:
+            log_messages.append(f"❌ Error API: {e}")
             log_container.markdown("\n\n".join(log_messages))
 
-    except Exception as e:
-        log_messages.append(f"❌ Error API: {e}")
-    finally:
+    # --- FLUJO B: FECHA MANUAL (SOLO DIAGNÓSTICO DE ESTRUCTURA) ---
+    else:
+        st.warning(f"📅 Se detectó fecha manual: {report_date.strftime('%d-%m-%Y')}")
+        log_messages.append("--- [MODO DIAGNÓSTICO] Consultando getHistory ---")
         log_container.markdown("\n\n".join(log_messages))
+        
+        url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
+        
+        # Tomamos la primera estación del Shapefile para probar
+        test_station = stations[0]
+        
+        # Payload exacto según tu Postman
+        payload = {
+            "location": test_station,
+            "startDate": f"01-01-{report_date.year}",
+            "endDate": report_date.strftime('%d-%m-%Y'),
+            "period": "M" 
+        }
+        
+        try:
+            # Hacemos la petición de prueba
+            r = session.post(url_historial, headers=headers, json=payload, verify=False, timeout=20)
+            
+            if r.status_code == 200:
+                # AQUÍ SE IMPRIME LA ESTRUCTURA PARA QUE LA VEAS
+                st.write(f"### 🧪 Estructura JSON devuelta por getHistory para: {test_station}")
+                st.json(r.json())
+                st.info("Copia el contenido de arriba para ajustar la extracción del historial.")
+            else:
+                st.error(f"El servidor respondió con error {r.status_code}")
+                st.write(r.text)
+                
+        except Exception as e:
+            st.error(f"Error de conexión al historial: {e}")
+            
+        # Devolvemos DataFrame vacío en modo diagnóstico para no romper el script
+        return pd.DataFrame(columns=['Name', 'ENTIDAD', 'P_mm'])
+
     return pd.DataFrame(results)
 
 
@@ -1168,6 +1198,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
