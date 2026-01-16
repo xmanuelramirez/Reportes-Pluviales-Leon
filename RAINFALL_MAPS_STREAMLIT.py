@@ -374,18 +374,25 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
             # 1. Nombre tal cual viene en la API
             api_name = str(info.get('nombre', '')).upper().strip()
             
-            # 2. Lluvia
+            # 2. Extraer lluvia (precipitacionAcumuladaAnual1 según tu JSON)
             lluvia = info.get('precipitacionAcumuladaAnual1', 0)
-            try: lluvia = float(str(lluvia).replace(',', ''))
-            except: lluvia = 0.0
+            try: 
+                lluvia = float(str(lluvia).replace(',', ''))
+            except: 
+                lluvia = 0.0
 
-            # 3. Guardamos SIN modificaciones manuales (para que el match sea directo con tu SHP)
+            # 3. Guardamos los datos
             results.append({
                 'Name': api_name,
                 'ENTIDAD': 'SAPAL',
                 'P_mm': lluvia
             })
-            log_messages.append(f"✅ API detectó: **{api_name}**")
+            
+            # --- LÍNEA MODIFICADA PARA MOSTRAR LA LECTURA ---
+            log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
+            
+            # Actualizamos el contenedor visual inmediatamente
+            log_container.markdown("\n\n".join(log_messages))
 
     except Exception as e:
         log_messages.append(f"❌ Error API: {e}")
@@ -1149,6 +1156,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
