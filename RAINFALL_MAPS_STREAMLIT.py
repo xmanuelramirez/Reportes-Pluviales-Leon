@@ -367,58 +367,69 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
     log_messages.append("--- Extracción automática de SAPAL (si la API lo permite) ---")
     log_container.markdown("\n\n".join(log_messages))
 
-    # Lista de nombres EXACTOS que la API pública de SAPAL acepta
+    # Lista actualizada de nombres que reconoce el nuevo endpoint (según Postman)
     estaciones_publicas = [
-        "Centro", "Explora", "P Ibarrilla", "Santa Rosa", "Blvd La Luz",
-        "Cervantes", "Chapalita", "Insurgentes", "Pta Sta Ana", "Sapamilpa", "Torres Landa"
+        "Amalias", "Centro", "Explora", "P Ibarrilla", "Santa Rosa", "Blvd La Luz",
+        "Cervantes", "Chapalita", "Insurgentes", "Pta Sta Ana", "Sapamilpa", 
+        "Torres Landa", "Morelos", "Hidalgo", "Villas de San Juan"
     ]
 
-    api_url = "https://www.sapal.gob.mx/api/v1/estaciones/concentrado"
+    # Nueva URL del servicio del Portal SAPAL
+    api_url = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
+    
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/json;charset=UTF-8",
-        "Referer": "https://www.sapal.gob.mx/estaciones-meteorologicas",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
     }
     session = requests.Session()
     session.get("https://www.sapal.gob.mx/estaciones-meteorologicas", headers=headers, timeout=15)
 
     results = []
     for api_station_name in estaciones_publicas:
+        # Formato de fecha según Postman: DD-MM-YYYY
         report_date_str = report_date.strftime('%d-%m-%Y')
+        
+        # El JSON de Postman usa "period": "M" para historial o "D" para diario
+        # Ajustamos al formato exacto del nuevo endpoint
         payload = {
-            "location": api_station_name, "period": "D",
-            "startDate": report_date_str, "endDate": report_date_str
+            "location": api_station_name,
+            "startDate": report_date_str,
+            "endDate": report_date_str,
+            "period": "D"  # Probamos con "D" para el dato del día
         }
+
         try:
-            response = session.post(api_url, headers=headers, json=payload, timeout=30)
+            # verify=False ayuda si el servidor de SAPAL tiene certificados SSL antiguos (común en gobierno)
+            response = requests.post(api_url, headers=headers, json=payload, timeout=20, verify=False)
             response.raise_for_status()
-            try:
-                data = response.json()
-            except Exception as e_json:
-                log_messages.append(f"❗ SAPAL {api_station_name}: Error JSON: {e_json}\nStatus code: {response.status_code}\nRespuesta: {response.text[:300]}")
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
-                log_container.markdown("\n\n".join(log_messages))
-                time.sleep(0.2)
-                continue
-            registros = data.get("registro")
+            data = response.json()
+            
+            # Según la estructura típica de estas APIs nuevas de SAPAL:
+            # Los datos suelen venir en una lista llamada 'data' o 'result'
+            registros = data.get("data", []) or data.get("registro", [])
+            
             if not registros:
-                log_messages.append(f"⚠️ SAPAL {api_station_name}: La API no devolvió datos para la fecha.")
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                log_messages.append(f"⚠️ SAPAL {api_station_name}: Sin datos en esta fecha.")
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
                 continue
-            df_station = pd.DataFrame(registros)
-            if 'precipitacionanual' in df_station.columns:
-                df_station['precipitacionanual'] = pd.to_numeric(df_station['precipitacionanual'], errors='coerce')
-                last_valid_precip = df_station['precipitacionanual'].dropna().iloc[-1] if not df_station['precipitacionanual'].dropna().empty else np.nan
+
+            # Extraemos el valor de precipitación (ajusta el nombre si el JSON dice 'valor' o 'precipitacion')
+            # Usualmente es el último registro del día
+            df_temp = pd.DataFrame(registros)
+            
+            # Buscamos la columna de lluvia (en las nuevas APIs suele llamarse 'value' o 'precipitacion')
+            col_lluvia = next((c for c in df_temp.columns if 'precip' in c.lower() or 'value' in c.lower()), None)
+            
+            if col_lluvia:
+                valor_lluvia = pd.to_numeric(df_temp[col_lluvia], errors='coerce').sum()
+                log_messages.append(f"✅ SAPAL {api_station_name}: {valor_lluvia} mm")
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': valor_lluvia})
             else:
-                last_valid_precip = np.nan
-            if pd.notna(last_valid_precip):
-                log_messages.append(f"✅ SAPAL {api_station_name}: {last_valid_precip} mm")
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': last_valid_precip})
-            else:
-                log_messages.append(f"⚠️ SAPAL {api_station_name}: Dato no válido en la respuesta.")
-                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
+
         except Exception as e:
-            log_messages.append(f"⚠️ SAPAL {api_station_name}: Error de API: {e}")
+            log_messages.append(f"❌ SAPAL {api_station_name}: Error de conexión.")
             results.append({'Name': api_station_name, 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
         finally:
             log_container.markdown("\n\n".join(log_messages))
@@ -1155,6 +1166,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
