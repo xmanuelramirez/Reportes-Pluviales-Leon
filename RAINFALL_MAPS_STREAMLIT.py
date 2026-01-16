@@ -357,65 +357,42 @@ import re
 
 import time # Añade esta si no la tienes
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
-    """
-    Versión para GitHub/Streamlit Cloud - API REST Directa.
-    Sin dependencias de navegadores.
-    """
     results = []
     log_messages.append("--- Extrayendo Datos de SAPAL (API REST) ---")
     log_container.markdown("\n\n".join(log_messages))
 
     url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
     session = requests.Session()
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://www.sapal.gob.mx/"
-    }
+    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0", "Referer": "https://www.sapal.gob.mx/"}
 
     try:
         response = session.get(url_lista, headers=headers, verify=False, timeout=20)
-        response.raise_for_status()
         raw_data = response.json()
         items = raw_data.get('items', {})
         
-        if not items:
-            log_messages.append("⚠️ No se encontraron estaciones en el servidor.")
-            return pd.DataFrame()
-
         for st_id, info in items.items():
-            # 1. Nombre original
-            api_name_raw = info.get('nombre', '').strip()
+            # 1. Nombre tal cual viene en la API
+            api_name = str(info.get('nombre', '')).upper().strip()
             
-            # 2. Lluvia Acumulada Anual (Dato directo de SAPAL)
-            lluvia_val = info.get('precipitacionAcumuladaAnual1', 0)
-            try:
-                lluvia_val = float(str(lluvia_val).replace(',', ''))
-            except:
-                lluvia_val = 0.0
+            # 2. Lluvia
+            lluvia = info.get('precipitacionAcumuladaAnual1', 0)
+            try: lluvia = float(str(lluvia).replace(',', ''))
+            except: lluvia = 0.0
 
-            # 3. Normalización para Match con Shapefile
-            nombre_para_mapa = api_name_raw.upper()
-
-            # --- CORRECCIONES DE NOMBRE ESPECÍFICAS ---
-            if "MORELOS" in nombre_para_mapa: nombre_para_mapa = "BLVD. MORELOS"
-            if "IBARRILLA" in nombre_para_mapa: nombre_para_mapa = "LOMAS DE IBARRILLA"
-            if "JEREZ" in nombre_para_mapa: nombre_para_mapa = "CERRITO DE JEREZ"
-
+            # 3. Guardamos SIN modificaciones manuales (para que el match sea directo con tu SHP)
             results.append({
-                'Name': nombre_para_mapa,
+                'Name': api_name,
                 'ENTIDAD': 'SAPAL',
-                'P_mm': lluvia_val
+                'P_mm': lluvia
             })
-            log_messages.append(f"✅ Detectada: **{nombre_para_mapa}** | {lluvia_val} mm")
+            log_messages.append(f"✅ API detectó: **{api_name}**")
 
     except Exception as e:
-        log_messages.append(f"❌ Error en API SAPAL: {e}")
-    
+        log_messages.append(f"❌ Error API: {e}")
     finally:
         log_container.markdown("\n\n".join(log_messages))
-
     return pd.DataFrame(results)
+    
 
 
 def filter_outliers(gdf, column='P_mm'):
@@ -910,44 +887,40 @@ else:
             )
             st.session_state.fig_plotly = fig_p
             
-            # --- 4. LÓGICA ESPACIAL REFORZADA (MATCH SEGURO) ---
+            # --- 4. LÓGICA ESPACIAL (MATCH TOTAL) ---
             total_df_con_na = total_df.copy()
             st.session_state.total_df_con_na = total_df_con_na
             
-            if total_df.dropna(subset=['P_mm']).empty: 
-                st.error("No se encontraron datos válidos.")
-                st.stop()
+            # 1. Preparamos el Shapefile (Copia limpia)
+            stations_shp = geodata['stations'].copy()
+            stations_shp['Name'] = stations_shp['Name'].astype(str).str.upper().str.strip()
+            stations_shp['ENTIDAD'] = stations_shp['ENTIDAD'].astype(str).str.upper().str.strip()
             
-            # A. Limpieza profunda antes del Merge (Evita que el mapa salga con 9 estaciones)
-            stations_gdf_clean = geodata['stations'].copy()
-            stations_gdf_clean['Name'] = stations_gdf_clean['Name'].str.upper().str.strip()
-            stations_gdf_clean['ENTIDAD'] = stations_gdf_clean['ENTIDAD'].str.upper().str.strip()
-            
-            total_df_clean = total_df.copy()
-            total_df_clean['Name'] = total_df_clean['Name'].str.upper().str.strip()
-            total_df_clean['ENTIDAD'] = total_df_clean['ENTIDAD'].str.upper().str.strip()
+            # 2. Preparamos los datos descargados
+            data_downloaded = total_df.copy()
+            data_downloaded['Name'] = data_downloaded['Name'].astype(str).str.upper().str.strip()
+            data_downloaded['ENTIDAD'] = data_downloaded['ENTIDAD'].astype(str).str.upper().str.strip()
 
-            # B. Vinculación (Merge)
-            updated_stations_gdf = stations_gdf_clean.merge(total_df_clean, on=['Name', 'ENTIDAD'], how='inner')
+            # 3. Unión (Merge)
+            # Unimos por Nombre y Entidad para evitar confusiones
+            updated_stations_gdf = stations_shp.merge(data_downloaded, on=['Name', 'ENTIDAD'], how='inner')
             
-            # C. Corrección de columna P_mm
+            # 4. Verificación de columna de lluvia
             if 'P_mm_y' in updated_stations_gdf.columns:
                 updated_stations_gdf['P_mm'] = updated_stations_gdf['P_mm_y']
             
             stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
-            
-            # D. Filtrado de Outliers (Aseguramos que no borre los 0.0 de SAPAL)
-            if not stations_filtered_gdf.empty:
-                # Si notas que desaparecen estaciones, puedes comentar la línea de filter_outliers
-                stations_filtered_gdf, outliers_df = filter_outliers(stations_filtered_gdf)
-            else:
-                outliers_df = pd.DataFrame()
 
-            # Guardar en estado de sesión
-            st.session_state.stations_filtered_gdf = stations_filtered_gdf
-            st.session_state.outliers_df = outliers_df
+            # --- DIAGNÓSTICO PARA TI (Aparecerá si hay menos de 15 estaciones) ---
+            if len(stations_filtered_gdf) < 15:
+                with st.expander("🕵️ Debug: ¿Por qué faltan estaciones?"):
+                    st.write("Nombres en tu Shapefile:", stations_shp[stations_shp['ENTIDAD']=='SAPAL']['Name'].tolist())
+                    st.write("Nombres en la API:", data_downloaded[data_downloaded['ENTIDAD']=='SAPAL']['Name'].tolist())
             
-            # E. Interpolación
+            # 5. Guardar resultados
+            st.session_state.stations_filtered_gdf = stations_filtered_gdf
+            st.session_state.outliers_df = pd.DataFrame()
+            
             num_final = len(stations_filtered_gdf)
             if num_final < 5:
                 interpolation_results, metrics_df = None, None
@@ -958,7 +931,7 @@ else:
             st.session_state.metrics_df = metrics_df
             st.session_state.progress_percent = 90
             st.rerun()
-
+            
         # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa)
         # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa con Diseño Original)
         elif st.session_state.progress_percent == 90:
@@ -1176,6 +1149,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
