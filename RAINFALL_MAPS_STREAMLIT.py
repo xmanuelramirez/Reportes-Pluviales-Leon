@@ -359,105 +359,48 @@ import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     results = []
-    is_today = report_date.date() == datetime.now().date()
-    
+    log_messages.append("--- Extrayendo Datos de SAPAL (API REST) ---")
+    log_container.markdown("\n\n".join(log_messages))
+
     url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
-    url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
-    
     session = requests.Session()
-    headers = {
-        "Accept": "application/json", 
-        "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0", 
-        "Referer": "https://www.sapal.gob.mx/"
-    }
+    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0", "Referer": "https://www.sapal.gob.mx/"}
 
     try:
-        if is_today:
-            # --- FLUJO HOY ---
-            log_messages.append("--- [FLUJO HOY] Usando getMapStationList ---")
-            log_container.markdown("\n\n".join(log_messages))
-            response = session.get(url_lista, headers=headers, verify=False, timeout=20)
-            items = response.json().get('items', {})
-            for st_id, info in items.items():
-                api_name = str(info.get('nombre', '')).upper().strip()
-                lluvia = info.get('precipitacionAcumuladaAnual1', 0)
-                try: lluvia = float(str(lluvia).replace(',', ''))
-                except: lluvia = 0.0
-                results.append({'Name': api_name, 'ENTIDAD': 'SAPAL', 'P_mm': lluvia})
-                log_messages.append(f"✅ {api_name}: {lluvia:.1f} mm")
-
-        else:
-            # --- FLUJO HISTÓRICO ---
-            log_messages.append(f"--- [FLUJO HISTÓRICO] Consultando getHistory para {report_date.strftime('%d-%m-%Y')} ---")
-            log_container.markdown("\n\n".join(log_messages))
-
-            # --- DIAGNÓSTICO FORZADO (FUERA DE HILOS) ---
-            # Probamos con la primera estación de tu lista
-            test_name = stations[0].title().replace('Sapal ', '').strip()
-            payload_test = {
-                "location": test_name,
-                "startDate": f"01-01-{report_date.year}",
-                "endDate": report_date.strftime('%d-%m-%Y'),
-                "period": "M" 
-            }
+        response = session.get(url_lista, headers=headers, verify=False, timeout=20)
+        raw_data = response.json()
+        items = raw_data.get('items', {})
+        
+        for st_id, info in items.items():
+            # 1. Nombre tal cual viene en la API
+            api_name = str(info.get('nombre', '')).upper().strip()
             
-            log_messages.append(f"🔍 Realizando petición de diagnóstico para: {test_name}")
+            # 2. Extraer lluvia (precipitacionAcumuladaAnual1 según tu JSON)
+            lluvia = info.get('precipitacionAcumuladaAnual1', 0)
+            try: 
+                lluvia = float(str(lluvia).replace(',', ''))
+            except: 
+                lluvia = 0.0
+
+            # 3. Guardamos los datos
+            results.append({
+                'Name': api_name,
+                'ENTIDAD': 'SAPAL',
+                'P_mm': lluvia
+            })
+            
+            # --- LÍNEA MODIFICADA PARA MOSTRAR LA LECTURA ---
+            log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
+            
+            # Actualizamos el contenedor visual inmediatamente
             log_container.markdown("\n\n".join(log_messages))
-            
-            r_test = session.post(url_historial, headers=headers, json=payload_test, verify=False, timeout=20)
-            
-            # ESTO SÍ SE VA A IMPRIMIR EN TU STREAMLIT
-            st.subheader("📊 ESTRUCTURA TÉCNICA DETECTADA (getHistory)")
-            if r_test.status_code == 200:
-                json_diag = r_test.json()
-                st.json(json_diag) # <--- AQUÍ SE MUESTRA EL JSON COMPLETO
-            else:
-                st.error(f"Error en diagnóstico: Status {r_test.status_code}")
-                st.write(r_test.text)
-
-            # --- CONTINUAR CON EL RESTO EN PARALELO ---
-            def fetch_history_worker(nombre_estacion):
-                name_clean = nombre_estacion.title().replace('Sapal ', '').strip()
-                payload = {
-                    "location": name_clean,
-                    "startDate": f"01-01-{report_date.year}",
-                    "endDate": report_date.strftime('%d-%m-%Y'),
-                    "period": "M" 
-                }
-                try:
-                    r = session.post(url_historial, headers=headers, json=payload, verify=False, timeout=15)
-                    if r.status_code == 200:
-                        data = r.json()
-                        regs = data.get('data', []) if isinstance(data, dict) else data
-                        if regs:
-                            df_tmp = pd.DataFrame(regs)
-                            col = next((c for c in df_tmp.columns if any(x in c.lower() for x in ['acum', 'precip', 'value'])), None)
-                            if col:
-                                valor = pd.to_numeric(df_tmp[col], errors='coerce').iloc[-1]
-                                return {'Name': nombre_estacion.upper(), 'P_mm': float(valor), 'ok': True}
-                    return {'Name': nombre_estacion.upper(), 'P_mm': 0.0, 'ok': False}
-                except:
-                    return {'Name': nombre_estacion.upper(), 'P_mm': np.nan, 'ok': False}
-
-            with ThreadPoolExecutor(max_workers=10) as executor:
-                futures = [executor.submit(fetch_history_worker, st_name) for st_name in stations]
-                for f in as_completed(futures):
-                    res = f.result()
-                    results.append({'Name': res['Name'], 'ENTIDAD': 'SAPAL', 'P_mm': res['P_mm']})
-                    if res['ok']:
-                        log_messages.append(f"✅ {res['Name']}: {res['P_mm']:.1f} mm")
-                    else:
-                        log_messages.append(f"⚠️ {res['Name']}: Sin datos")
-                    log_container.markdown("\n\n".join(log_messages))
 
     except Exception as e:
-        log_messages.append(f"❌ Error Crítico: {e}")
-    
+        log_messages.append(f"❌ Error API: {e}")
     finally:
         log_container.markdown("\n\n".join(log_messages))
-        
-    return pd.DataFrame(results)    
+    return pd.DataFrame(results)
+
 
 
 def filter_outliers(gdf, column='P_mm'):
@@ -1225,6 +1168,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
