@@ -358,11 +358,11 @@ import re
 import time # Añade esta si no la tienes
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
     """
-    Versión 19.0 - Inteligente y Paralela.
-    Detecta automáticamente si debe usar el catálogo de hoy o el historial pasado.
+    Versión 20.0 - Match-Maker.
+    Primero descarga el catálogo para obtener los nombres OFICIALES 
+    y luego pide el historial usando esos nombres exactos.
     """
     results = []
-    # 1. ¿Es hoy? (Comparamos solo fecha, sin hora)
     is_today = report_date.date() == datetime.now().date()
     
     url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
@@ -373,75 +373,83 @@ def fetch_sapal_data(stations, report_date, log_messages, log_container):
         "User-Agent": "Mozilla/5.0", "Referer": "https://www.sapal.gob.mx/"
     }
 
-    if is_today:
-        log_messages.append("--- Extrayendo datos en tiempo real (Hoy) ---")
+    session = requests.Session()
+
+    try:
+        # 1. SIEMPRE OBTENER EL CATÁLOGO PRIMERO (Para saber los nombres exactos)
+        log_messages.append("--- Sincronizando catálogo de nombres con SAPAL ---")
         log_container.markdown("\n\n".join(log_messages))
-        try:
-            resp = requests.get(url_lista, headers=headers, verify=False, timeout=15)
-            # Para hoy, buscamos en 'items'
-            items = resp.json().get('items', {})
-            for st_id, info in items.items():
+        
+        resp_cat = session.get(url_lista, headers=headers, verify=False, timeout=15)
+        items_api = resp_cat.json().get('items', {})
+        
+        # Creamos una lista de nombres tal cual los quiere el API
+        nombres_oficiales_api = [info.get('nombre') for info in items_api.values() if info.get('nombre')]
+
+        if is_today:
+            log_messages.append("--- Procesando datos en tiempo real (Hoy) ---")
+            for st_id, info in items_api.items():
                 name = str(info.get('nombre', '')).upper().strip()
                 lluvia = info.get('precipitacionAcumuladaAnual1', 0)
                 try: lluvia = float(str(lluvia).replace(',', ''))
                 except: lluvia = 0.0
                 results.append({'Name': name, 'ENTIDAD': 'SAPAL', 'P_mm': lluvia})
-            log_messages.append(f"✅ Hoy: {len(results)} estaciones detectadas.")
-        except Exception as e:
-            log_messages.append(f"❌ Error en datos de hoy: {e}")
+                log_messages.append(f"✅ **{name}**: {lluvia:.1f} mm")
+        
+        else:
+            # --- MODO HISTÓRICO CON NOMBRES OFICIALES ---
+            log_messages.append(f"--- Consultando Historial: {report_date.strftime('%d-%m-%Y')} ---")
+            log_container.markdown("\n\n".join(log_messages))
+
+            def fetch_worker(nombre_api_exacto):
+                payload = {
+                    "location": nombre_api_exacto,
+                    "startDate": f"01-01-{report_date.year}",
+                    "endDate": report_date.strftime('%d-%m-%Y'),
+                    "period": "D" # Usamos 'D' para que nos de el acumulado diario exacto
+                }
+                try:
+                    r = session.post(url_historial, headers=headers, json=payload, verify=False, timeout=12)
+                    if r.status_code == 200:
+                        regs = r.json()
+                        if isinstance(regs, dict): regs = regs.get('data', [])
+                        
+                        if regs:
+                            df_tmp = pd.DataFrame(regs)
+                            # Buscamos columna de lluvia acumulada
+                            # En el historial suele ser 'precipitacionAcumuladaAnual1' o similar
+                            col = next((c for c in df_tmp.columns if any(x in c.lower() for x in ['acum', 'precip', 'value'])), None)
+                            if col:
+                                # Tomamos la última lectura del periodo solicitado
+                                valor = pd.to_numeric(df_tmp[col], errors='coerce').iloc[-1]
+                                return {'Name': nombre_api_exacto.upper(), 'P_mm': float(valor), 'success': True}
+                    
+                    return {'Name': nombre_api_exacto.upper(), 'P_mm': 0.0, 'success': False}
+                except:
+                    return {'Name': nombre_api_exacto.upper(), 'P_mm': np.nan, 'success': False}
+
+            # Consultamos usando los nombres que el API nos acaba de dar
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                futures = [executor.submit(fetch_worker, n) for n in nombres_oficiales_api]
+                for f in as_completed(futures):
+                    res = f.result()
+                    # Normalización final para tu Shapefile
+                    nombre_final = res['Name']
+                    if "MORELOS" in nombre_final: nombre_final = "BLVD. MORELOS"
+                    
+                    results.append({'Name': nombre_final, 'ENTIDAD': 'SAPAL', 'P_mm': res['P_mm']})
+                    if res['success'] and res['P_mm'] > 0:
+                        log_messages.append(f"✅ **{nombre_final}**: {res['P_mm']:.1f} mm")
+                    else:
+                        log_messages.append(f"⚠️ **{nombre_final}**: 0.0 mm")
+                    log_container.markdown("\n\n".join(log_messages))
+
+    except Exception as e:
+        log_messages.append(f"❌ Error crítico: {e}")
     
-    else:
-        # --- MODO HISTÓRICO (Para Fechas Manuales) ---
-        log_messages.append(f"--- Consultando Historial: {report_date.strftime('%d-%m-%Y')} ---")
+    finally:
         log_container.markdown("\n\n".join(log_messages))
         
-        # Primero necesitamos los nombres 'cortos' que entiende la API
-        # Los sacamos de tu lista del Shapefile pero limpiándolos
-        nombres_api = [s.title().replace('Sapal ', '').strip() for s in stations]
-
-        def fetch_worker(nombre_original):
-            # Limpiamos el nombre para la API (Ej: "SAPAL HIDALGO" -> "Hidalgo")
-            nombre_clean = nombre_original.upper().replace('SAPAL ', '').strip().title()
-            
-            payload = {
-                "location": nombre_clean,
-                "startDate": f"01-01-{report_date.year}",
-                "endDate": report_date.strftime('%d-%m-%Y'),
-                "period": "M"
-            }
-            try:
-                r = requests.post(url_historial, headers=headers, json=payload, verify=False, timeout=12)
-                if r.status_code == 200:
-                    data = r.json()
-                    # getHistory devuelve lista en 'data' o directamente la lista
-                    regs = data.get('data', []) if isinstance(data, dict) else data
-                    
-                    if regs:
-                        df_tmp = pd.DataFrame(regs)
-                        # Buscamos cualquier columna que diga 'precip' o 'acumulada' o 'value'
-                        col = next((c for c in df_tmp.columns if any(x in c.lower() for x in ['precip', 'acum', 'value'])), None)
-                        if col:
-                            # Tomamos el último valor (el más cercano a la fecha fin)
-                            valor = pd.to_numeric(df_tmp[col], errors='coerce').iloc[-1]
-                            return {'Name': nombre_original.upper(), 'P_mm': float(valor), 'success': True}
-                
-                # Si no hay datos, devolvemos 0.0 para que el mapa no tenga huecos
-                return {'Name': nombre_original.upper(), 'P_mm': 0.0, 'success': False}
-            except:
-                return {'Name': nombre_original.upper(), 'P_mm': np.nan, 'success': False}
-
-        # Ejecutamos en paralelo (máximo 10 a la vez para no ser bloqueados)
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(fetch_worker, st) for st in stations]
-            for f in as_completed(futures):
-                res = f.result()
-                results.append({'Name': res['Name'], 'ENTIDAD': 'SAPAL', 'P_mm': res['P_mm']})
-                if res['success']:
-                    log_messages.append(f"✅ {res['Name']}: {res['P_mm']:.1f} mm")
-                else:
-                    log_messages.append(f"⚠️ {res['Name']}: Sin datos (0.0 mm)")
-                log_container.markdown("\n\n".join(log_messages))
-
     return pd.DataFrame(results)
     
 
@@ -1211,6 +1219,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
