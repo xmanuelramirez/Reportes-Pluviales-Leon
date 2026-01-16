@@ -357,47 +357,91 @@ import re
 
 import time # Añade esta si no la tienes
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
+    """
+    Versión 17.0 - Soporte para Fechas Manuales e Históricas.
+    Si la fecha es hoy, usa MapStationList. Si es pasada, usa getHistory.
+    """
     results = []
-    log_messages.append("--- Extrayendo Datos de SAPAL (API REST) ---")
-    log_container.markdown("\n\n".join(log_messages))
-
+    # Determinar si es una consulta de hoy o histórica
+    is_today = report_date.date() == datetime.now().date()
+    
+    # Endpoints de tu Postman
     url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
+    url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
+    
     session = requests.Session()
-    headers = {"Accept": "application/json", "User-Agent": "Mozilla/5.0", "Referer": "https://www.sapal.gob.mx/"}
+    headers = {
+        "Accept": "application/json", 
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0", 
+        "Referer": "https://www.sapal.gob.mx/"
+    }
 
     try:
-        response = session.get(url_lista, headers=headers, verify=False, timeout=20)
-        raw_data = response.json()
-        items = raw_data.get('items', {})
-        
-        for st_id, info in items.items():
-            # 1. Nombre tal cual viene en la API
-            api_name = str(info.get('nombre', '')).upper().strip()
-            
-            # 2. Extraer lluvia (precipitacionAcumuladaAnual1 según tu JSON)
-            lluvia = info.get('precipitacionAcumuladaAnual1', 0)
-            try: 
-                lluvia = float(str(lluvia).replace(',', ''))
-            except: 
-                lluvia = 0.0
-
-            # 3. Guardamos los datos
-            results.append({
-                'Name': api_name,
-                'ENTIDAD': 'SAPAL',
-                'P_mm': lluvia
-            })
-            
-            # --- LÍNEA MODIFICADA PARA MOSTRAR LA LECTURA ---
-            log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
-            
-            # Actualizamos el contenedor visual inmediatamente
+        if is_today:
+            log_messages.append("--- Extrayendo datos en tiempo real (Hoy) ---")
             log_container.markdown("\n\n".join(log_messages))
+            response = session.get(url_lista, headers=headers, verify=False, timeout=20)
+            items = response.json().get('items', {})
+            
+            for st_id, info in items.items():
+                api_name = str(info.get('nombre', '')).upper().strip()
+                lluvia = info.get('precipitacionAcumuladaAnual1', 0)
+                try: lluvia = float(str(lluvia).replace(',', ''))
+                except: lluvia = 0.0
+                
+                results.append({'Name': api_name, 'ENTIDAD': 'SAPAL', 'P_mm': lluvia})
+                log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
+        
+        else:
+            log_messages.append(f"--- Consultando Historial para el: {report_date.strftime('%d-%m-%Y')} ---")
+            log_container.markdown("\n\n".join(log_messages))
+            
+            # Para el historial, SAPAL necesita saber qué estaciones existen primero
+            # Usamos la lista de nombres del Shapefile que ya tienes
+            for api_name in stations:
+                # FORMATO REQUERIDO POR SAPAL: DD-MM-YYYY
+                fecha_ini = f"01-01-{report_date.year}"
+                fecha_fin = report_date.strftime('%d-%m-%Y')
+                
+                payload = {
+                    "location": api_name,
+                    "startDate": fecha_ini,
+                    "endDate": fecha_fin,
+                    "period": "D" # Pedimos diario para sumar el acumulado hasta esa fecha
+                }
+                
+                try:
+                    res = session.post(url_historial, headers=headers, json=payload, verify=False, timeout=15)
+                    if res.status_code == 200:
+                        data = res.json()
+                        registros = data.get('data', []) if isinstance(data, dict) else data
+                        
+                        if registros:
+                            df_temp = pd.DataFrame(registros)
+                            col = next((c for c in df_temp.columns if any(x in c.lower() for x in ['precip', 'valor', 'value'])), None)
+                            if col:
+                                valor = pd.to_numeric(df_temp[col], errors='coerce').sum()
+                                results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': valor})
+                                log_messages.append(f"✅ **{api_name}**: {valor:.1f} mm")
+                            else:
+                                results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
+                        else:
+                            results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
+                    else:
+                        results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                except:
+                    results.append({'Name': api_name.upper(), 'ENTIDAD': 'SAPAL', 'P_mm': np.nan})
+                
+                log_container.markdown("\n\n".join(log_messages))
+                time.sleep(0.05) # Pequeña pausa para no saturar
 
     except Exception as e:
-        log_messages.append(f"❌ Error API: {e}")
+        log_messages.append(f"❌ Error crítico: {e}")
+    
     finally:
         log_container.markdown("\n\n".join(log_messages))
+        
     return pd.DataFrame(results)
     
 
@@ -1167,6 +1211,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
