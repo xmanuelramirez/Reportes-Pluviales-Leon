@@ -358,81 +358,111 @@ import re
 import time # Añade esta si no la tienes
 
 def fetch_sapal_data(stations, report_date, log_messages, log_container):
+    """
+    Versión Final Pro - Sincronización Total para Streamlit Cloud.
+    Usa el catálogo dinámico para asegurar match con el historial (POST).
+    """
     results = []
-    # 1. Identificar si es Hoy o Histórico
+    # 1. Determinar si es consulta en tiempo real o histórica
     is_today = report_date.date() == datetime.now().date()
     
-    session = requests.Session()
+    url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
+    url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
+    
+    # Headers optimizados para evitar bloqueos del servidor
     headers = {
         "Accept": "application/json", 
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0", 
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://www.sapal.gob.mx/"
     }
+    
+    session = requests.Session()
 
-    # --- FLUJO A: TIEMPO REAL (TU CÓDIGO ORIGINAL INTACTO) ---
-    if is_today:
-        log_messages.append("--- Extrayendo Datos de SAPAL (API REST - Tiempo Real) ---")
-        log_container.markdown("\n\n".join(log_messages))
-        url_lista = "https://services.sapal.gob.mx/portal/v1/climate/getMapStationList"
-        try:
-            response = session.get(url_lista, headers=headers, verify=False, timeout=20)
-            raw_data = response.json()
-            items = raw_data.get('items', {})
-            
-            for st_id, info in items.items():
-                api_name = str(info.get('nombre', '')).upper().strip()
-                lluvia = info.get('precipitacionAcumuladaAnual1', 0)
-                try: 
-                    lluvia = float(str(lluvia).replace(',', ''))
-                except: 
-                    lluvia = 0.0
+    try:
+        # --- PASO 1: OBTENER EL CATÁLOGO DINÁMICO (SIEMPRE) ---
+        # Esto nos da la 'ubicacion' (ID técnico) y el 'nombre' (para el mapa)
+        r_cat = session.get(url_lista, headers=headers, verify=False, timeout=20)
+        r_cat.raise_for_status()
+        items_api = r_cat.json().get('items', {})
 
-                results.append({'Name': api_name, 'ENTIDAD': 'SAPAL', 'P_mm': lluvia})
-                log_messages.append(f"✅ **{api_name}**: {lluvia:.1f} mm")
+        if not items_api:
+            log_messages.append("⚠️ El servidor de SAPAL no devolvió estaciones activas.")
+            return pd.DataFrame()
+
+        # --- CASO A: TIEMPO REAL (HOY) ---
+        if is_today:
+            log_messages.append("--- [FLUJO HOY] Extrayendo acumulados actuales ---")
+            for st_id, info in items_api.items():
+                nombre_mapa = str(info.get('nombre', '')).upper().strip()
+                val = info.get('precipitacionAcumuladaAnual1', 0)
+                
+                try: val_num = float(str(val).replace(',', ''))
+                except: val_num = 0.0
+                
+                results.append({'Name': nombre_mapa, 'ENTIDAD': 'SAPAL', 'P_mm': val_num})
+                log_messages.append(f"✅ **{nombre_mapa}**: {val_num:.1f} mm")
                 log_container.markdown("\n\n".join(log_messages))
-        except Exception as e:
-            log_messages.append(f"❌ Error API Hoy: {e}")
+
+        # --- CASO B: HISTÓRICO (FECHA MANUAL) ---
+        else:
+            log_messages.append(f"--- [FLUJO HISTÓRICO] Consultando {len(items_api)} estaciones para el {report_date.strftime('%d-%m-%Y')} ---")
             log_container.markdown("\n\n".join(log_messages))
 
-    # --- FLUJO B: FECHA MANUAL (IMPRESIÓN DE ESTRUCTURA) ---
-    else:
-        log_messages.append(f"--- [MODO DIAGNÓSTICO] Obteniendo JSON de getHistory ---")
+            def history_worker(info_estacion):
+                # Usamos 'ubicacion' para la consulta técnica
+                llave_tecnica = info_estacion.get('ubicacion')
+                # Guardamos con el 'nombre' para que coincida con el Shapefile
+                nombre_mapa = str(info_estacion.get('nombre', '')).upper().strip()
+                
+                fecha_str = report_date.strftime('%d-%m-%Y')
+                payload = {
+                    "location": llave_tecnica,
+                    "startDate": fecha_str,
+                    "endDate": fecha_str,
+                    "period": "M" 
+                }
+                try:
+                    # Petición POST según especificación de Postman
+                    r = requests.post(url_historial, headers=headers, json=payload, verify=False, timeout=15)
+                    if r.status_code == 200:
+                        data = r.json()
+                        registros = data.get('items', {}).get('registros', [])
+                        if registros:
+                            # Sacamos el acumulado anual de ese día
+                            val_anual = registros[-1].get('precipitacionAnual', 0)
+                            return {'Name': nombre_mapa, 'P_mm': float(val_anual), 'ok': True}
+                    
+                    return {'Name': nombre_mapa, 'P_mm': 0.0, 'ok': False}
+                except:
+                    return {'Name': nombre_mapa, 'P_mm': np.nan, 'ok': False}
+
+            # Ejecución en paralelo (10 hilos para máxima velocidad en Streamlit Cloud)
+            with ThreadPoolExecutor(max_workers=10) as executor:
+                future_to_st = {executor.submit(history_worker, info): info for info in items_api.values()}
+                
+                for future in as_completed(future_to_st):
+                    res = future.result()
+                    
+                    # Pequeño ajuste para nombres con variaciones (Opcional)
+                    nombre_final = res['Name']
+                    if "MORELOS" in nombre_final: nombre_final = "BLVD MORELOS-MADRAZO"
+                    
+                    results.append({'Name': nombre_final, 'ENTIDAD': 'SAPAL', 'P_mm': res['P_mm']})
+                    
+                    if res['ok']:
+                        log_messages.append(f"✅ **{nombre_final}**: {res['P_mm']:.1f} mm")
+                    else:
+                        log_messages.append(f"⚠️ **{nombre_final}**: 0.0 mm (Sin registros)")
+                    
+                    # Actualizar UI de Streamlit
+                    log_container.markdown("\n\n".join(log_messages))
+
+    except Exception as e:
+        log_messages.append(f"❌ Error crítico en SAPAL: {e}")
         log_container.markdown("\n\n".join(log_messages))
         
-        url_historial = "https://services.sapal.gob.mx/portal/v1/climate/getHistory"
-        
-        # Intentamos con una estación que sabemos que existe: "Amalias"
-        payload = {
-            "location": "Amalias",
-            "startDate": f"01-01-{report_date.year}",
-            "endDate": report_date.strftime('%d-%m-%Y'),
-            "period": "M" 
-        }
-        
-        try:
-            r = session.post(url_historial, headers=headers, json=payload, verify=False, timeout=20)
-            
-            # FORZAR LA SALIDA EN PANTALLA (Aparecerá arriba de todo en tu Dashboard)
-            st.header("🕵️ ESTRUCTURA DEL HISTORIAL DETECTADA")
-            if r.status_code == 200:
-                data_json = r.json()
-                st.write("Copia este JSON completo y pégalo en el chat:")
-                st.json(data_json)
-                log_messages.append("✅ JSON histórico obtenido con éxito. Revisa el dashboard.")
-            else:
-                st.error(f"Error {r.status_code}: {r.text}")
-                
-        except Exception as e:
-            st.error(f"Fallo la conexión al historial: {e}")
-
-        # --- PARA QUE EL MAPA NO SALGA VACÍO MIENTRAS TANTO ---
-        # Llenamos con 0.0 todas las estaciones de tu Shapefile
-        for st_name in stations:
-            results.append({'Name': st_name.upper().strip(), 'ENTIDAD': 'SAPAL', 'P_mm': 0.0})
-
     return pd.DataFrame(results)
-
 
 
 def filter_outliers(gdf, column='P_mm'):
@@ -1200,6 +1230,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
