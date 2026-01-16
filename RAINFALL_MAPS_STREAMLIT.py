@@ -654,67 +654,48 @@ else:
                   # --- INSERTAR ESTE BLOQUE DENTRO DEL ELSE (VISTA DE CONFIGURACIÓN) ---
                  # --- FECHA + BOTÓN (BLOQUE ÚNICO, SIN NameError) ---
          
-         # 0) Siempre inicialice
+        # 0) Siempre inicialice
          report_date = None
-         manual_report_date = None
          
          # 1) Selector de fecha manual
          use_manual_date = st.checkbox(
-             "Usar fecha específica (día/mes/año)",
+             "Usar fecha específica (Calendario)",
              value=st.session_state.get("use_manual_date", False),
              disabled=(st.session_state.processing_state == 'processing'),
              key="use_manual_date"
          )
          
          if use_manual_date:
-             c1, c2, c3 = st.columns(3)
-         
-             with c1:
-                 day = st.number_input(
-                     "Día", min_value=1, max_value=31,
-                     value=int(st.session_state.get("manual_day", datetime.now().day)),
-                     step=1, key="manual_day",
-                     disabled=(st.session_state.processing_state == 'processing'),
-                 )
-             with c2:
-                 month = st.number_input(
-                     "Mes", min_value=1, max_value=12,
-                     value=int(st.session_state.get("manual_month", datetime.now().month)),
-                     step=1, key="manual_month",
-                     disabled=(st.session_state.processing_state == 'processing'),
-                 )
-             with c3:
-                 year = st.number_input(
-                     "Año", min_value=2000, max_value=datetime.now().year,
-                     value=int(st.session_state.get("manual_year", datetime.now().year)),
-                     step=1, key="manual_year",
-                     disabled=(st.session_state.processing_state == 'processing'),
-                 )
-         
-             try:
-                 manual_report_date = datetime(int(year), int(month), int(day))
-                 report_date = manual_report_date
-                 st.info(f"Se usará la fecha seleccionada: {manual_report_date.strftime('%d-%m-%Y')}")
-             except ValueError:
-                 report_date = None
-                 st.error("Fecha inválida. Revise día/mes/año (ej. 31/04 no existe).")
+             # Selector de calendario interactivo
+             selected_date = st.date_input(
+                 "Selecciona el día del reporte:",
+                 value=st.session_state.get("manual_date_val", datetime.now()),
+                 min_value=datetime(2000, 1, 1),
+                 max_value=datetime.now(),
+                 disabled=(st.session_state.processing_state == 'processing'),
+                 key="manual_date_val"
+             )
+             
+             # Convertir el objeto 'date' a 'datetime' para que no truene el resto del código
+             report_date = datetime.combine(selected_date, datetime.min.time())
+             st.info(f"📅 Se usará la fecha seleccionada: **{report_date.strftime('%d-%m-%Y')}**")
          
          else:
-             # 2) Fecha automática (SAPAL hoy / CONAGUA última)
+             # 2) Fecha automática (Solo se escribe una vez)
              if report_option == 'Solo Estaciones SAPAL':
                  report_date = datetime.now()
-                 st.info(f"Se usará la fecha de hoy: {report_date.strftime('%d-%m-%Y')}")
+                 st.info(f"📅 Se usará la fecha de hoy: **{report_date.strftime('%d-%m-%Y')}**")
              else:
                  with st.spinner("Buscando la última fecha de CONAGUA..."):
                      latest_conagua_date = get_latest_conagua_date(locations_conagua)
          
                  if latest_conagua_date:
                      report_date = pd.to_datetime(latest_conagua_date).to_pydatetime()
-                     st.info(f"Fecha más reciente encontrada: {report_date.strftime('%d-%m-%Y')}")
+                     st.info(f"📅 Fecha más reciente encontrada: **{report_date.strftime('%d-%m-%Y')}**")
                  else:
                      report_date = datetime.now()
-                     st.warning("No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
-                     st.info(f"Fecha de corte: {report_date.strftime('%d-%m-%Y')}")
+                     st.warning("⚠️ No se pudo contactar a CONAGUA. Se usará la fecha de hoy.")
+                     st.info(f"📅 Fecha de corte: **{report_date.strftime('%d-%m-%Y')}**")
          
          # 3) Botón para disparar pipeline
          can_run = (report_date is not None)
@@ -1272,6 +1253,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
