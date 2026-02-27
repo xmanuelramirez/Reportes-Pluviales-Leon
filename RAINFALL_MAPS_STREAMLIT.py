@@ -159,16 +159,6 @@ def load_kmz_from_local(kmz_file_path):
     Lee un archivo KMZ desde el sistema de archivos local (o clonado por Streamlit),
     lo descomprime y lo parsea para obtener un GeoDataFrame.
     """
-    # Verificar si el placeholder existe antes de usarlo (aunque ya lo inicializamos arriba)
-    if 'log_messages' in st.session_state:
-        st.session_state.log_messages.append(f"📦 Procesando KMZ local: {kmz_file_path}...")
-        if 'log_container_placeholder' in st.session_state:
-             # Usar try-except para evitar errores si el placeholder es stale
-            try:
-                st.session_state.log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
-            except:
-                pass
-
     try:
         kml_content = None
         with zipfile.ZipFile(kmz_file_path, 'r') as zip_ref:
@@ -179,13 +169,6 @@ def load_kmz_from_local(kmz_file_path):
         
         if kml_content is None:
             raise ValueError("No se encontró ningún archivo KML dentro del KMZ.")
-
-        if 'log_messages' in st.session_state:
-            st.session_state.log_messages.append("📝 KML extraído. Parseando placemarks...")
-            try:
-                st.session_state.log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
-            except:
-                pass
 
         root = ET.fromstring(kml_content)
         namespace = '{http://www.opengis.net/kml/2.2}' # Namespace KML estándar
@@ -209,13 +192,6 @@ def load_kmz_from_local(kmz_file_path):
             raise ValueError("No se encontraron placemarks (puntos) en el KML.")
 
         gdf = gpd.GeoDataFrame(placemarks, crs="EPSG:4326") # KML usa WGS84 (4326)
-
-        if 'log_messages' in st.session_state:
-            st.session_state.log_messages.append("✅ GeoDataFrame de sensores de río creado.")
-            try:
-                st.session_state.log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
-            except:
-                pass
         
         return gdf
 
