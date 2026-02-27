@@ -6,6 +6,11 @@ Versión 12.0 - Versión final estable con lógica de SAPAL de R, CONAGUA en par
 """
 
 # --- LIBRERÍAS PRINCIPALES ---
+import zipfile # Para descomprimir el KMZ (que es un ZIP)
+import xml.etree.ElementTree as ET # Para parsear el KML (XML)
+from shapely.geometry import Point # Para construir las geometrías de los puntos
+# Ya tienes geopandas, pero asegúrate de que esté importado al inicio
+import geopandas as gpd
 from matplotlib import patheffects
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
@@ -47,6 +52,72 @@ import time
 # --- FUNCIÓN PARA OBTENER CHROME EN MODO HEADLESS ---
 import tempfile
 import uuid
+
+@st.cache_data(ttl=3600) # Cachear para no procesar el KMZ en cada ejecución
+def load_kmz_from_local(kmz_file_path):
+    """
+    Lee un archivo KMZ desde el sistema de archivos local (o clonado por Streamlit),
+    lo descomprime y lo parsea para obtener un GeoDataFrame.
+    """
+    st.session_state.log_messages.append(f"📦 Procesando KMZ local: {kmz_file_path}...")
+    st.session_state.log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
+
+    try:
+        kml_content = None
+        with zipfile.ZipFile(kmz_file_path, 'r') as zip_ref:
+            for name in zip_ref.namelist():
+                if name.lower().endswith('.kml'):
+                    kml_content = zip_ref.read(name)
+                    break
+        
+        if kml_content is None:
+            raise ValueError("No se encontró ningún archivo KML dentro del KMZ.")
+
+        st.session_state.log_messages.append("📝 KML extraído. Parseando placemarks...")
+        st.session_state.log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
+
+        root = ET.fromstring(kml_content)
+        namespace = '{http://www.opengis.net/kml/2.2}' # Namespace KML estándar
+        
+        placemarks = []
+        for placemark in root.findall(f'.//{namespace}Placemark'):
+            name_element = placemark.find(f'{namespace}name')
+            name = name_element.text if name_element is not None else "Unnamed Sensor"
+            
+            point_node = placemark.find(f'{namespace}Point')
+            if point_node is not None:
+                coordinates_element = point_node.find(f'{namespace}coordinates')
+                if coordinates_element is not None:
+                    coordinates_text = coordinates_element.text.strip()
+                    parts = coordinates_text.split(',')
+                    if len(parts) >= 2:
+                        lon, lat = float(parts[0]), float(parts[1])
+                        placemarks.append({'Name': name, 'geometry': Point(lon, lat)})
+
+        if not placemarks:
+            raise ValueError("No se encontraron placemarks (puntos) en el KML.")
+
+        gdf = gpd.GeoDataFrame(placemarks, crs="EPSG:4326") # KML usa WGS84 (4326)
+
+        st.session_state.log_messages.append("✅ GeoDataFrame de sensores de río creado.")
+        st.session_state.log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
+        
+        return gdf
+
+    except zipfile.BadZipFile:
+        st.error(f"El archivo {kmz_file_path} no es un KMZ válido (no es un ZIP).")
+        st.stop()
+    except ValueError as e:
+        st.error(f"Error al procesar el KML de {kmz_file_path}: {e}")
+        st.stop()
+    except FileNotFoundError:
+        st.error(f"Archivo KMZ no encontrado en la ruta: {kmz_file_path}. Asegúrate de que esté en tu repositorio.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Ocurrió un error inesperado al cargar el KMZ {kmz_file_path}: {e}")
+        st.stop()
+    return gpd.GeoDataFrame() # Devuelve un GDF vacío en caso de fallo
+
 def get_headless_chrome_driver():
     """
     Devuelve un WebDriver de Chrome en modo headless (sin interfaz gráfica), usando un user-data-dir realmente único y evitando conflictos de puerto.
@@ -540,20 +611,30 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
     return {"raster_io": final_raster_io, "raster_image": out_image, "raster_meta": out_meta, "best_method": best_method_row['Método']}, metrics_df
     
 @st.cache_resource
+@st.cache_resource # Se mantiene @st.cache_resource
 def load_geodata():
-    shapefile_path = "shapefiles"
+    shapefile_path = "shapefiles" # Esta es la carpeta en tu repositorio de GitHub
     try:
-        # Asegúrate de que TODAS estas líneas existan dentro del diccionario data
         data = {
             "boundary": gpd.read_file(os.path.join(shapefile_path, "LIMITE.shp")),
             "stations": gpd.read_file(os.path.join(shapefile_path, "ESTACIONES_actualizado.shp")),
             "hillshade": rasterio.open(os.path.join(shapefile_path, "HILLSHADE_LEON.tif")),
             "urban": gpd.read_file(os.path.join(shapefile_path, "LIMITE_URBANO.shp")),
-            "cuenca": gpd.read_file(os.path.join(shapefile_path, "CUENCA_PALOTE.shp")), # <-- ESTA ES LA QUE FALTABA
+            "cuenca": gpd.read_file(os.path.join(shapefile_path, "CUENCA_PALOTE.shp")),
             "presa": gpd.read_file(os.path.join(shapefile_path, "EL PALOTE.shp")),
-            "streams": gpd.read_file(os.path.join(shapefile_path, "CORRIENTES_LEON_012025.shp"))
+            "streams": gpd.read_file(os.path.join(shapefile_path, "CORRIENTES_LEON_012025.shp")),
+            # AÑADIR ESTA LÍNEA PARA CARGAR LOS SENSORES DE RÍO DESDE EL KMZ
+            "river_sensors": load_kmz_from_local(os.path.join(shapefile_path, "sensores_rios.kmz"))
         }
         
+        # --- NUEVO: ASEGURAR CRS CONSISTENTE PARA TODAS LAS CAPAS VECTORIALES ---
+        # El CRS de hillshade suele ser el ideal para la proyección del mapa
+        target_crs = data["hillshade"].crs 
+        for key in ["boundary", "stations", "urban", "cuenca", "presa", "streams", "river_sensors"]:
+            # Solo reproyectar si el GeoDataFrame no está vacío y su CRS es diferente
+            if not data[key].empty and data[key].crs != target_crs:
+                data[key] = data[key].to_crs(target_crs)
+
         # CARGA DE LOGOS (AZUL Y BLANCO)
         try:
             data["logo_azul"] = mpimg.imread(os.path.join(shapefile_path, "logo_sapal_azul.png"))
@@ -561,17 +642,98 @@ def load_geodata():
         except Exception as e_logo:
             data["logo_azul"] = None
             data["logo_blanco"] = None
-            st.warning(f"Advertencia: No se pudieron cargar los logos: {e_logo}")
+            st.warning(f"Advertencia: No se pudieron cargar los logos desde '{shapefile_path}': {e_logo}")
             
         return data
     except Exception as e:
         st.error(f"Error fatal al cargar archivos geoespaciales: {e}")
         st.stop()
 
-geodata = load_geodata()
+# --- Este bloque DEBE ir después de la definición de load_geodata() ---
+geodata = load_geodata() 
 stations_gdf = geodata["stations"]
 locations_sapal = stations_gdf[stations_gdf['ENTIDAD'] == 'SAPAL']['Name'].tolist()
 locations_conagua = stations_gdf[stations_gdf['ENTIDAD'] == 'CONAGUA']['Name'].tolist()
+
+# --- NUEVO: OBTENER NOMBRES DE SENSORES DE RÍO DEL GEODATAFRAME CARGADO ---
+river_sensors_gdf = geodata["river_sensors"]
+if not river_sensors_gdf.empty:
+    locations_river_sensors_kmz = river_sensors_gdf['Name'].tolist()
+else:
+    locations_river_sensors_kmz = []
+    st.warning("No se pudieron cargar los sensores de río o el GeoDataFrame está vacío.")
+
+# --- CONFIGURACIÓN DE SEMÁFORO DE RÍOS ---
+RIVER_ALERTS = {
+    "VERDE": {"label": "Nivel Normal", "color": "#00FF00", "symbol": "circle"},
+    "AMARILLO": {"label": "Atención", "color": "#FFFF00", "symbol": "triangle-up"},
+    "NARANJA": {"label": "Prevención", "color": "#FFA500", "symbol": "diamond"},
+    "ROJO": {"label": "Alerta", "color": "#FF0000", "symbol": "square"}
+}
+
+# Mapeo de nombres largos (KMZ) a nombres cortos diplomáticos (para mostrar en leyenda)
+RIVER_NAME_MAPPING = {
+    "San Jose El Alto (Arroyo Tajo de Santa Ana)": "Tajo de Santa Ana",
+    "Parque Metropolitano (Arroyo Los Castillos)": "Arroyo Los Castillos",
+    "Pablo del Río (Arroyo Mariches)": "Arroyo Mariches",
+    "Blvd. Vicente Valtierra (Río Los Gómez)": "Río Los Gómez (Valtierra)",
+    "Blvd. Mariano Escobedo (Río Los Gómez)": "Río Los Gómez (Escobedo)",
+    "Blvd. Juan Alonso de Torres (Arroyo La Patiña)": "Arroyo La Patiña",
+    "Blvd. A. López Mateos (Río Los Gómez)": "Río Los Gómez (López Mateos)",
+    "Blvd. JJ Torres Landa (Arroyo Alfaro)": "Arroyo Alfaro",
+    "Autopista León-Aguascalientes (Río Turbio)": "Río Turbio"
+}
+
+# Mapeo inverso para asegurar la consistencia al unir
+INVERSE_RIVER_NAME_MAPPING = {v: k for k, v in RIVER_NAME_MAPPING.items()}
+
+# --- Función para obtener datos de sensores de río (simulada) ---
+def fetch_river_sensor_data(sensor_names_kmz, target_date, log_messages, log_container):
+    """
+    Simula la extracción de datos de sensores de río (nivel y categoría de alerta) para una fecha dada.
+    En una aplicación real, esto consultaría una API real.
+    `sensor_names_kmz` debe ser la lista de nombres originales del KMZ.
+    """
+    results = []
+    log_messages.append(f"--- Extrayendo datos de sensores de río para {target_date.strftime('%d-%m-%Y')}... ---")
+    log_container.markdown("\n\n".join(log_messages))
+
+    for kmz_name in sensor_names_kmz:
+        diplomatic_name = RIVER_NAME_MAPPING.get(kmz_name, kmz_name) # Obtener nombre diplomático
+
+        # Simular datos: el nivel y la alerta cambian según la fecha/nombre del sensor
+        # Esto es un ejemplo; la lógica real dependería de tu API.
+        # Usamos un hash para una simulación algo consistente pero variable.
+        seed = hash(f"{kmz_name}-{target_date.day}-{target_date.month}-{target_date.year}") % 100
+        
+        level_m = round(1.0 + (seed % 20) * 0.1, 2) # Nivel entre 1.0 y 2.9 m
+
+        if level_m < 1.5:
+            alert = "VERDE"
+        elif level_m < 2.0:
+            alert = "AMARILLO"
+        elif level_m < 2.5:
+            alert = "NARANJA"
+        else:
+            alert = "ROJO"
+        
+        results.append({
+            "KMZ_Name": kmz_name,    # Nombre original del KMZ
+            "Name_Display": diplomatic_name, # Nombre diplomático para mostrar
+            "Level_m": level_m,
+            "Alert": alert
+        })
+        log_messages.append(f"🌊 **{diplomatic_name}**: Nivel {level_m} m, Alerta: {RIVER_ALERTS[alert]['label']}")
+        log_container.markdown("\n\n".join(log_messages))
+
+    return pd.DataFrame(results)
+
+if 'log_messages' not in st.session_state:
+    st.session_state.log_messages = []
+if 'log_container_placeholder' not in st.session_state:
+    # Inicializar con un placeholder dummy que se usará en las funciones cacheadas
+    # y será reemplazado por el real en el bloque de procesamiento de la UI.
+    st.session_state.log_container_placeholder = st.empty()
 
 def reset_analysis():
     keys_to_reset = ['map_generated', 'figure', 'raster_io', 'png_buffer', 'report_date_str', 'stats_panel_md']
@@ -735,18 +897,19 @@ else:
 
     # --- LÓGICA DE PROCESAMIENTO POR ETAPAS (CORREGIDA) ---
     if st.session_state.processing_state == 'processing':
-        log_container_placeholder = col_info.empty() # Usaremos un placeholder para el log
+        log_container_placeholder = col_info.empty() 
+        st.session_state.log_container_placeholder = log_container_placeholder # Actualizar session state con el placeholder visible
 
         # ETAPA 1: Progreso 0% -> 25% (Extracción SAPAL)
         if st.session_state.progress_percent == 0:
             report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
             sapal_df = fetch_sapal_data(locations_sapal, report_date_pd, st.session_state.log_messages, log_container_placeholder)
             st.session_state.sapal_df_processed = sapal_df # Guardar resultado intermedio
-            st.session_state.progress_percent = 25
+            st.session_state.progress_percent = 20
             st.rerun()
 
         # ETAPA 2: Progreso 25% -> 60% (Extracción CONAGUA)
-        elif st.session_state.progress_percent == 25:
+        elif st.session_state.progress_percent == 20:
             report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
             start_of_year = pd.to_datetime(f"{report_date_pd.year}-01-01")
             sapal_df = st.session_state.sapal_df_processed # Recuperar resultado anterior
@@ -758,13 +921,28 @@ else:
                 total_df = sapal_df
 
             st.session_state.total_df_processed = total_df
-            st.session_state.progress_percent = 60
+            st.session_state.progress_percent = 40
+            st.rerun()
+        # ETAPA 2.5: Progreso 40% -> 60% (Extracción Sensores de Río) - NUEVA ETAPA
+        elif st.session_state.progress_percent == 40: # <--- COMIENZA AQUÍ esta nueva etapa
+            if locations_river_sensors_kmz: # Solo si hay sensores cargados (del KMZ)
+                report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
+                # Llama a la función simulada para obtener datos de ríos
+                river_data_df = fetch_river_sensor_data(locations_river_sensors_kmz, report_date_pd, st.session_state.log_messages, log_container_placeholder)
+                st.session_state.river_data_processed = river_data_df # Guarda el DataFrame con los datos de los ríos
+            else:
+                st.session_state.river_data_processed = pd.DataFrame() # Guarda un DataFrame vacío si no hay sensores
+                st.session_state.log_messages.append("⚠️ No hay sensores de río disponibles para obtener datos.")
+                log_container_placeholder.markdown("\n\n".join(st.session_state.log_messages))
+
+            st.session_state.progress_percent = 60 # <--- ESTE ES EL NUEVO PORCENTAJE AL FINAL DE ESTA ETAPA
             st.rerun()
 
         # ETAPA 3: Progreso 60% -> 90% (Cálculos, Excel, Gráfica e Interpolación)
         elif st.session_state.progress_percent == 60:
             # --- 0. VARIABLES BASE ---
             total_df = st.session_state.total_df_processed
+            river_data_df = st.session_state.river_data_processed
             report_date_pd = pd.to_datetime(st.session_state.report_date_to_process)
             ano_act = report_date_pd.year
             mes_idx = report_date_pd.month - 1
@@ -917,6 +1095,19 @@ else:
             if 'P_mm_y' in updated_stations_gdf.columns: updated_stations_gdf['P_mm'] = updated_stations_gdf['P_mm_y']
             stations_filtered_gdf = updated_stations_gdf.dropna(subset=['P_mm']).copy()
 
+            river_sensors_gdf_merged = gpd.GeoDataFrame() # Inicializar un GeoDataFrame vacío
+            if not river_sensors_gdf.empty and not river_data_df.empty:
+                # Unir el GeoDataFrame de sensores (cargado de load_geodata) con los datos extraídos (de fetch_river_sensor_data)
+                # El 'Name' en river_sensors_gdf es el nombre largo del KMZ
+                # El 'KMZ_Name' en river_data_df es también el nombre largo del KMZ
+                river_sensors_gdf_merged = river_sensors_gdf.merge(
+                    river_data_df, 
+                    left_on='Name', 
+                    right_on='KMZ_Name', 
+                    how='inner'
+                )
+            st.session_state.river_sensors_gdf_merged = river_sensors_gdf_merged # <--- GUARDAR ESTE NUEVO GEODATAFRAME UNIDO          
+
             st.session_state.stations_filtered_gdf = stations_filtered_gdf
             st.session_state.outliers_df = pd.DataFrame()
             if len(stations_filtered_gdf) >= 5:
@@ -926,17 +1117,18 @@ else:
             
             st.session_state.interpolation_results = interpolation_results
             st.session_state.metrics_df = metrics_df
-            st.session_state.progress_percent = 90
+            st.session_state.progress_percent = 80
             st.rerun()
 
         # ETAPA 4: RENDERIZADO DEL MAPA PROFESIONAL (DISEÑO ORIGINAL)
-        elif st.session_state.progress_percent == 90:
+        elif st.session_state.progress_percent == 80:
             if 'stations_filtered_gdf' not in st.session_state:
                 st.session_state.progress_percent = 60
                 st.rerun()
                 
             stations_filtered_gdf = st.session_state.stations_filtered_gdf
             interpolation_results = st.session_state.interpolation_results
+            river_sensors_gdf_merged = st.session_state.river_sensors_gdf_merged
             report_date_pd = pd.to_datetime(st.session_state.report_date_to_process.date())
 
             # --- 1. CONFIGURACIÓN DE LIENZO ---
@@ -1295,6 +1487,19 @@ else:
             if not stations_filtered_gdf.empty:
                 stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'SAPAL'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#00C5FF', markersize=30, edgecolor='black', zorder=6)
                 stations_filtered_gdf[stations_filtered_gdf['ENTIDAD'] == 'CONAGUA'].to_crs(geodata['hillshade'].crs).plot(ax=ax, marker='s', color='#55FF00', markersize=30, edgecolor='black', zorder=6)
+                
+            if not river_sensors_gdf_merged.empty:
+                for alert_category, alert_info in RIVER_ALERTS.items():
+                    subset = river_sensors_gdf_merged[river_sensors_gdf_merged['Alert'] == alert_category]
+                    if not subset.empty:
+                        subset.plot(ax=ax, marker=alert_info['symbol'], 
+                                    color=alert_info['color'], 
+                                    markersize=100, # Aumentar tamaño para visibilidad
+                                    edgecolor='black', # Borde negro para contraste
+                                    linewidth=1,
+                                    label=f"Ríos: {alert_info['label']}", # Para la leyenda
+                                    zorder=7, # Zorder más alto para que estén encima
+                                    path_effects=[patheffects.withStroke(linewidth=2, foreground='white')]) # Efecto de borde blanco para resaltar    
 
             ax.set_title(f"PRECIPITACIÓN ACUMULADA ANUAL\nCORTE AL {report_date_pd.strftime('%d de %B de %Y').upper()}", fontsize=14, fontweight='bold', loc='left')
             ax.tick_params(axis='both', which='major', labelsize=10, direction='in', color='black', labelcolor='black')
@@ -1320,11 +1525,16 @@ else:
             legend_elements = [
                 Patch(facecolor='none', edgecolor='#38A800', linewidth=2, label='MUNICIPIO DE LEÓN'),
                 Patch(facecolor='none', edgecolor='black', linewidth=1, label='LÍMITE URBANO'),
-                Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'), # Color rojo original
+                Patch(facecolor='none', edgecolor='#FF0000', linewidth=1.5, label='CUENCA P. PALOTE'),
                 Patch(facecolor='#00E6A9', edgecolor='#002673', label='PRESA EL PALOTE'),
                 Line2D([0], [0], color='#10008C', lw=1, label='CORRIENTES DE AGUA'),
                 Line2D([0], [0], marker='s', color='#55FF00', label='CONAGUA', markerfacecolor='#55FF00', markeredgecolor='black', markersize=8, linestyle='None'),
-                Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL', markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None')
+                Line2D([0], [0], marker='s', color='#00C5FF', label='SAPAL', markerfacecolor='#00C5FF', markeredgecolor='black', markersize=8, linestyle='None'),
+                # NUEVAS ENTRADAS PARA LOS SENSORES DE RÍO
+                Line2D([0], [0], marker=RIVER_ALERTS["VERDE"]["symbol"], color='none', label=f'Ríos: {RIVER_ALERTS["VERDE"]["label"]}', markerfacecolor=RIVER_ALERTS["VERDE"]["color"], markeredgecolor='black', markersize=8, linestyle='None'),
+                Line2D([0], [0], marker=RIVER_ALERTS["AMARILLO"]["symbol"], color='none', label=f'Ríos: {RIVER_ALERTS["AMARILLO"]["label"]}', markerfacecolor=RIVER_ALERTS["AMARILLO"]["color"], markeredgecolor='black', markersize=8, linestyle='None'),
+                Line2D([0], [0], marker=RIVER_ALERTS["NARANJA"]["symbol"], color='none', label=f'Ríos: {RIVER_ALERTS["NARANJA"]["label"]}', markerfacecolor=RIVER_ALERTS["NARANJA"]["color"], markeredgecolor='black', markersize=8, linestyle='None'),
+                Line2D([0], [0], marker=RIVER_ALERTS["ROJO"]["symbol"], color='none', label=f'Ríos: {RIVER_ALERTS["ROJO"]["label"]}', markerfacecolor=RIVER_ALERTS["ROJO"]["color"], markeredgecolor='black', markersize=8, linestyle='None')
             ]
             legend_ax = ax.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=10, title='SIMBOLOGÍA', title_fontsize=12, frameon=True, edgecolor='black', facecolor='white')
             legend_ax.get_title().set_fontweight('bold')
@@ -1412,11 +1622,34 @@ else:
                 columns={'count': 'Estaciones', 'mean': 'Promedio', 'std': 'Desv. Est.', 'min': 'Mínimo', 'max': 'Máximo'}
             )
             report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
-            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}"
+            
+             river_stats_str = ""
+            river_detail_df = pd.DataFrame() # Inicializar vacío
+            if not river_sensors_gdf_merged.empty:
+                verde_count = len(river_sensors_gdf_merged[river_sensors_gdf_merged['Alert'] == 'VERDE'])
+                amarillo_count = len(river_sensors_gdf_merged[river_sensors_gdf_merged['Alert'] == 'AMARILLO'])
+                naranja_count = len(river_sensors_gdf_merged[river_sensors_gdf_merged['Alert'] == 'NARANJA'])
+                rojo_count = len(river_sensors_gdf_merged[river_sensors_gdf_merged['Alert'] == 'ROJO'])
+                
+                river_stats_str = f"\n- **Sensores de Río:** {len(river_sensors_gdf_merged)} activos"
+                if verde_count: river_stats_str += f"\n  - {RIVER_ALERTS['VERDE']['label']}: {verde_count}"
+                if amarillo_count: river_stats_str += f"\n  - {RIVER_ALERTS['AMARILLO']['label']}: {amarillo_count}"
+                if naranja_count: river_stats_str += f"\n  - {RIVER_ALERTS['NARANJA']['label']}: {naranja_count}"
+                if rojo_count: river_stats_str += f"\n  - {RIVER_ALERTS['ROJO']['label']}: {rojo_count}"
+
+                river_detail_df = river_sensors_gdf_merged[['Name_Display', 'Level_m', 'Alert']].rename(
+                    columns={'Name_Display': 'Sensor', 'Level_m': 'Nivel (m)', 'Alert': 'Alerta'}
+                )
+
+            stats_md = f"### Resumen del Reporte\n- **Fecha de Corte:** {report_date_str_formatted}\n- **Estaciones Válidas:** {len(stations_filtered_gdf)}\n- **Método:** {interpolation_results['best_method'] if interpolation_results else 'N/A'}{river_stats_str}"
             
             st.session_state.stats_panel_md = {
-                "header": stats_md, "total_df_con_na": total_df_con_na, 
-                "outliers_df": outliers_df, "desc_stats": desc_stats, "metrics_df": metrics_df
+                "header": stats_md, 
+                "total_df_con_na": total_df_con_na, 
+                "outliers_df": pd.DataFrame(), 
+                "desc_stats": desc_stats, 
+                "metrics_df": metrics_df,
+                "river_detail_df": river_detail_df # <--- NUEVO: Datos detallados de los ríos
             }
             
             st.session_state.map_generated = True
@@ -1438,6 +1671,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
