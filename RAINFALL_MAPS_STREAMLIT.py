@@ -588,10 +588,10 @@ else:
 
 # --- CONFIGURACIÓN DE SEMÁFORO DE RÍOS ---
 RIVER_ALERTS = {
-    "VERDE": {"label": "Nivel Normal", "color": "#00FF00", "symbol": "circle"},
-    "AMARILLO": {"label": "Atención", "color": "#FFFF00", "symbol": "triangle-up"},
-    "NARANJA": {"label": "Prevención", "color": "#FFA500", "symbol": "diamond"},
-    "ROJO": {"label": "Alerta", "color": "#FF0000", "symbol": "square"}
+    "VERDE": {"label": "Nivel Normal", "color": "#00FF00", "symbol": "o"},
+    "AMARILLO": {"label": "Atención", "color": "#FFFF00", "symbol": "^"},
+    "NARANJA": {"label": "Prevención", "color": "#FFA500", "symbol": "D"},
+    "ROJO": {"label": "Alerta", "color": "#FF0000", "symbol": "s"}
 }
 
 # Mapeo de nombres largos (KMZ) a nombres cortos diplomáticos (para mostrar en leyenda)
