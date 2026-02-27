@@ -1623,7 +1623,7 @@ else:
             )
             report_date_str_formatted = report_date_pd.strftime('%d de %B de %Y').title()
             
-             river_stats_str = ""
+            river_stats_str = ""
             river_detail_df = pd.DataFrame() # Inicializar vacío
             if not river_sensors_gdf_merged.empty:
                 verde_count = len(river_sensors_gdf_merged[river_sensors_gdf_merged['Alert'] == 'VERDE'])
@@ -1671,6 +1671,7 @@ else:
         </div>
         """, unsafe_allow_html=True)
         
+
 
 
 
