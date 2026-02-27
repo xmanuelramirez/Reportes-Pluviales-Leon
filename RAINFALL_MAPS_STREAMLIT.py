@@ -195,19 +195,9 @@ def load_kmz_from_local(kmz_file_path):
         
         return gdf
 
-    except zipfile.BadZipFile:
-        st.error(f"El archivo {kmz_file_path} no es un KMZ válido (no es un ZIP).")
-        st.stop()
-    except ValueError as e:
-        st.error(f"Error al procesar el KML de {kmz_file_path}: {e}")
-        st.stop()
-    except FileNotFoundError:
-        st.error(f"Archivo KMZ no encontrado en la ruta: {kmz_file_path}. Asegúrate de que esté en tu repositorio.")
-        st.stop()
     except Exception as e:
-        st.error(f"Ocurrió un error inesperado al cargar el KMZ {kmz_file_path}: {e}")
-        st.stop()
-    return gpd.GeoDataFrame() # Devuelve un GDF vacío en caso de fallo
+        print(f"Error al cargar KMZ {kmz_file_path}: {e}")
+        return gpd.GeoDataFrame()
 
 def get_headless_chrome_driver():
     """
@@ -572,15 +562,18 @@ def load_geodata():
         except Exception as e_logo:
             data["logo_azul"] = None
             data["logo_blanco"] = None
-            st.warning(f"Advertencia: No se pudieron cargar los logos desde '{shapefile_path}': {e_logo}")
+            print(f"Advertencia: No se pudieron cargar los logos desde '{shapefile_path}': {e_logo}")
             
         return data
     except Exception as e:
-        st.error(f"Error fatal al cargar archivos geoespaciales: {e}")
-        st.stop()
+        raise e
 
 # --- Este bloque DEBE ir después de la definición de load_geodata() ---
-geodata = load_geodata() 
+try:
+    geodata = load_geodata()
+except Exception as e:
+    st.error(f"Error fatal al cargar archivos geoespaciales: {e}")
+    st.stop() 
 stations_gdf = geodata["stations"]
 locations_sapal = stations_gdf[stations_gdf['ENTIDAD'] == 'SAPAL']['Name'].tolist()
 locations_conagua = stations_gdf[stations_gdf['ENTIDAD'] == 'CONAGUA']['Name'].tolist()
