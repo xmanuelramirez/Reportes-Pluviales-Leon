@@ -557,7 +557,7 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
         d = np.linalg.norm(train_coords - test_coords, axis=1)
         if np.any(d == 0):
             return train_values[d == 0][0]
-        d = np.maximum(d, 1e-3)  # evita pesos infinitos cerca del punto
+        d = np.maximum(d, 1e-6)  # evita pesos infinitos cerca del punto
         w = 1.0 / (d ** power)
         return np.sum(w * train_values) / np.sum(w)
     points_proj = points_gdf.to_crs("EPSG:32614"); boundary_proj = boundary_gdf.to_crs("EPSG:32614")
@@ -580,7 +580,10 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
         except Exception: continue
     if k_preds: metrics.append({'Método': 'Kriging', 'RMSE': np.sqrt(mean_squared_error(k_reals, k_preds)), 'MAE': mean_absolute_error(k_reals, k_preds)})
     metrics_df = pd.DataFrame(metrics).round(3)
-    best_method_row = metrics_df.loc[metrics_df['RMSE'].idxmin()]
+    if metrics_df['Método'].str.contains('IDW').any():
+        best_method_row = metrics_df[metrics_df['Método'].str.contains('IDW')].iloc[0]
+    else:
+        best_method_row = metrics_df.loc[metrics_df['RMSE'].idxmin()]
     xmin, ymin, xmax, ymax = boundary_proj.total_bounds
     grid_x, grid_y = np.arange(xmin, xmax, resolution), np.arange(ymin, ymax, resolution)
     if 'IDW' in best_method_row['Método']:
@@ -592,6 +595,10 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
         ok = OrdinaryKriging(coords[:, 0], coords[:, 1], values, variogram_model='spherical', verbose=False, enable_plotting=False)
         z_grid, _ = ok.execute('grid', grid_x, grid_y)
     z_grid = np.where(z_grid < 0, 0, z_grid)
+    # Limitar al rango observado: evita "picos fantasma" entre estaciones (típico de Kriging)
+    z_grid = np.clip(z_grid, float(values.min()), float(values.max()))
+    # Suavizado gaussiano: elimina fish eyes y da transiciones más naturales
+    z_grid = gaussian_filter(z_grid, sigma=2.0, mode='nearest')
     transform = from_origin(grid_x[0], grid_y[-1], resolution, resolution)
     with rasterio.io.MemoryFile() as memfile:
         with memfile.open(
