@@ -551,17 +551,19 @@ def filter_outliers(gdf, column='P_mm'):
     return gdf_filtered, outliers
 
 def find_best_interpolation_model(points_gdf, boundary_gdf):
-    resolution = 100
+    resolution = 200
     if len(points_gdf) < 5: return None, None
     def _custom_idw(train_coords, train_values, test_coords, power):
         d = np.linalg.norm(train_coords - test_coords, axis=1)
-        if np.any(d == 0): return train_values[d == 0][0]
+        if np.any(d == 0):
+            return train_values[d == 0][0]
+        d = np.maximum(d, 1e-3)  # evita pesos infinitos cerca del punto
         w = 1.0 / (d ** power)
         return np.sum(w * train_values) / np.sum(w)
     points_proj = points_gdf.to_crs("EPSG:32614"); boundary_proj = boundary_gdf.to_crs("EPSG:32614")
     coords = np.array(list(zip(points_proj.geometry.x, points_proj.geometry.y))); values = points_proj['P_mm'].to_numpy()
     loo = LeaveOneOut()
-    idw_powers = np.arange(1.0, 4.1, 0.5); idw_rmse_scores = []
+    idw_powers = np.arange(1.0, 2.6, 0.5); idw_rmse_scores = []
     for p in idw_powers:
         preds = [_custom_idw(coords[train_idx], values[train_idx], coords[test_idx][0], p) for train_idx, test_idx in loo.split(coords)]
         idw_rmse_scores.append(np.sqrt(mean_squared_error(values, preds)))
