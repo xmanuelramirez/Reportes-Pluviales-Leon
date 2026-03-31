@@ -551,6 +551,12 @@ def filter_outliers(gdf, column='P_mm'):
     gdf_filtered = gdf[(gdf[column] >= lower_bound) & (gdf[column] <= upper_bound)]
     return gdf_filtered, outliers
 
+# --- LIBRERÍAS PRINCIPALES ---
+# ... (your existing imports)
+from scipy.ndimage import gaussian_filter # <--- ADD THIS LINE
+
+# ... (rest of your existing code)
+
 def find_best_interpolation_model(points_gdf, boundary_gdf):
     resolution = 200
     if len(points_gdf) < 5: return None, None
@@ -595,11 +601,16 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
     else:
         ok = OrdinaryKriging(coords[:, 0], coords[:, 1], values, variogram_model='spherical', verbose=False, enable_plotting=False)
         z_grid, _ = ok.execute('grid', grid_x, grid_y)
-    z_grid = np.where(z_grid < 0, 0, z_grid)
-    # Limitar al rango observado: evita "picos fantasma" entre estaciones (típico de Kriging)
+    
+    # Clip to observed range first to prevent extreme extrapolations
     z_grid = np.clip(z_grid, float(values.min()), float(values.max()))
-    # Suavizado gaussiano: elimina fish eyes y da transiciones más naturales
-    z_grid = gaussian_filter(z_grid, sigma=2.0, mode='nearest')
+    
+    # Suavizado gaussiano: Aumentar sigma para más suavidad
+    z_grid = gaussian_filter(z_grid, sigma=3.0, mode='nearest') # <--- Increased sigma
+    
+    # Re-clip after smoothing, as smoothing can push values slightly outside the original clip
+    z_grid = np.clip(z_grid, float(values.min()), float(values.max()))
+    
     transform = from_origin(grid_x[0], grid_y[-1], resolution, resolution)
     with rasterio.io.MemoryFile() as memfile:
         with memfile.open(
@@ -608,18 +619,29 @@ def find_best_interpolation_model(points_gdf, boundary_gdf):
         ) as dataset:
             dataset.write(z_grid, 1)
         with memfile.open() as src:
-            # Pasa el objeto src a la función mask
-            # Línea corregida
             out_image, out_transform = mask(src, boundary_gdf.geometry, crop=True, all_touched=True, filled=True, nodata=np.nan)
             out_meta = src.meta.copy()
 
-    # Se corrige el valor 'nodata' para que no sea 0
     out_meta.update({"driver": "GTiff", "height": out_image.shape[1], "width": out_image.shape[2], "transform": out_transform, "nodata": np.nan})
     final_raster_io = io.BytesIO()
     with rasterio.open(final_raster_io, "w", **out_meta) as dest: dest.write(out_image)
     final_raster_io.seek(0)
-    return {"raster_io": final_raster_io, "raster_image": out_image, "raster_meta": out_meta, "best_method": best_method_row['Método']}, metrics_df
     
+    # Calculate vmin and vmax for the colorbar from the actual masked raster data
+    # Exclude NaNs from the calculation
+    raster_data_flat = out_image[~np.isnan(out_image)]
+    
+    # Ensure there's data to calculate min/max, otherwise default
+    if raster_data_flat.size > 0:
+        cbar_vmin = raster_data_flat.min()
+        cbar_vmax = raster_data_flat.max()
+    else:
+        cbar_vmin = 0
+        cbar_vmax = stations_filtered_gdf['P_mm'].max() if not stations_filtered_gdf.empty else 10 # Fallback
+    
+    return {"raster_io": final_raster_io, "raster_image": out_image, "raster_meta": out_meta, 
+            "best_method": best_method_row['Método'], "cbar_vmin": cbar_vmin, "cbar_vmax": cbar_vmax}, metrics_df
+
 @st.cache_resource
 def load_geodata():
     shapefile_path = "shapefiles"
@@ -1302,7 +1324,6 @@ else:
             st.session_state.progress_percent = 90
             st.rerun()
             
-        # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa)
         # ETAPA 4: Progreso 90% -> 100% (Renderizado de Mapa con Diseño Original)
         elif st.session_state.progress_percent == 90:
             # Recuperamos todas las variables necesarias del estado de la sesión
@@ -1353,9 +1374,14 @@ else:
             if interpolation_results and np.any(interpolation_results["raster_image"]):
                 raster_image = np.ma.masked_invalid(interpolation_results["raster_image"])
                 raster_meta = interpolation_results["raster_meta"]
-                custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#f03725', '#F3FD89', '#1FB6EA'])
-                precip_min = stations_filtered_gdf['P_mm'].min()
-                precip_max = stations_filtered_gdf['P_mm'].max()
+                
+                # --- REVERSED COLORMAP (RED FOR HIGH, BLUE FOR LOW) ---
+                custom_cmap = LinearSegmentedColormap.from_list('custom_precip', ['#1FB6EA', '#F3FD89', '#f03725']) # <--- Changed order
+                
+                # --- USE cbar_vmin/cbar_vmax from interpolation_results ---
+                precip_min = interpolation_results["cbar_vmin"]
+                precip_max = interpolation_results["cbar_vmax"]
+                
                 show(raster_image, ax=ax, transform=raster_meta['transform'], cmap=custom_cmap, alpha=0.6, vmin=precip_min, vmax=precip_max, zorder=2)
                 raster_io = interpolation_results['raster_io']
             else:
@@ -1412,7 +1438,8 @@ else:
 
             if interpolation_results and np.any(interpolation_results["raster_image"]):
                 cbar_ax = fig.add_axes([0.77, 0.15, 0.02, 0.3])
-                norm = Normalize(vmin=precip_min, vmax=precip_max)
+                # Use the new cbar_vmin/vmax from interpolation_results
+                norm = Normalize(vmin=interpolation_results["cbar_vmin"], vmax=interpolation_results["cbar_vmax"]) # <--- Changed here
                 cb = ColorbarBase(cbar_ax, cmap=custom_cmap, norm=norm, orientation='vertical')
                 cb.ax.set_title('Precipitación\nAcumulada (mm)', size=10, weight='bold', pad=15)
                 cb.ax.tick_params(labelsize=9)
@@ -1449,10 +1476,18 @@ else:
             # --- APLICAR BLANCO A TODO EL TEXTO ---
             ax.title.set_color('white')
             ax.tick_params(axis='both', colors='white')
-            from matplotlib import patheffects # Asegurar import local
-            for label in ax.get_xticklabels() + ax.get_yticklabels():
-                label.set_color('white')
-                label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='black', alpha=0.5)])
+            # The next two lines are redundant and can be removed or streamlined.
+            # from matplotlib import patheffects # Asegurar import local
+            # for label in ax.get_xticklabels() + ax.get_yticklabels():
+            #     label.set_color('white')
+            #     label.set_path_effects([patheffects.withStroke(linewidth=3, foreground='black', alpha=0.5)])
+            
+            # Consolidated text color change (replaces the above loop for labels)
+            for text_obj in ax.get_xticklabels() + ax.get_yticklabels() + [ax.title, legend_ax.get_title()] + legend_ax.get_texts() + [t for t in ax.texts if t not in legend_ax.get_texts()]:
+                text_obj.set_color('white')
+                # Optional: Add path effects for better visibility on dark background
+                text_obj.set_path_effects([patheffects.withStroke(linewidth=3, foreground='black', alpha=0.5)])
+
 
             # Marcos, Grilla y Leyenda en Blanco
             for spine in ax.spines.values(): spine.set_edgecolor('white')
@@ -1462,8 +1497,7 @@ else:
             if leg:
                 leg.get_frame().set_facecolor('none')
                 leg.get_frame().set_edgecolor('white')
-                leg.get_title().set_color('white')
-                for text in leg.get_texts(): text.set_color('white')
+                # Title and text color already handled in the consolidated loop above
 
             # Barra de color y otros textos flotantes
             if 'cb' in locals():
@@ -1471,16 +1505,17 @@ else:
                 cb.ax.title.set_color('white')
                 cb.outline.set_edgecolor('white')
             
-            for t in ax.texts: t.set_color('white')
-            
             # Ajustar Escala Gráfica
             for patch in ax.patches:
                 if isinstance(patch, plt.Rectangle):
                     fc = patch.get_facecolor()
-                    if fc[0] > 0.8: # Segmentos blancos
-                        patch.set_facecolor('none'); patch.set_edgecolor('white')
-                    else: # Segmentos negros
-                        patch.set_facecolor('white'); patch.set_edgecolor('white')
+                    # Only change colors for the scale bar segments
+                    if patch.get_height() == bar_height: # This heuristically identifies scale bar rectangles
+                        if fc[0] > 0.8: # Segmentos blancos (originales)
+                            patch.set_facecolor('none'); patch.set_edgecolor('white')
+                        else: # Segmentos negros (originales)
+                            patch.set_facecolor('white'); patch.set_edgecolor('white')
+
 
             # --- 3. GUARDAR EN SESSION STATE Y TERMINAR ---
             st.session_state.figure = fig
@@ -1503,9 +1538,7 @@ else:
             st.session_state.map_generated = True
             st.session_state.processing_state = 'idle'
             st.session_state.progress_percent = 100
-            st.rerun()
-
-           
+            st.rerun()           
 
             
 
