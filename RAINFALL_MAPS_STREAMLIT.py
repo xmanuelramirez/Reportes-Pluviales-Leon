@@ -47,6 +47,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from scipy.ndimage import gaussian_filter
 import time
 
 # --- FUNCIÓN PARA OBTENER CHROME EN MODO HEADLESS ---
